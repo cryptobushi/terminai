@@ -57,6 +57,11 @@ class TerminaiApp {
     app.style.clipPath = this.skin.visual.shape;
     app.style.background = this.skin.visual.background;
 
+    // Create drag handle at the top
+    const dragHandle = document.createElement("div");
+    dragHandle.id = "drag-handle";
+    app.appendChild(dragHandle);
+
     // Create terminal viewport region
     const terminalContainer = document.createElement("div");
     terminalContainer.id = "terminal-container";
