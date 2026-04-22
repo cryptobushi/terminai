@@ -60,6 +60,14 @@ class TerminaiApp {
     // Create drag handle at the top
     const dragHandle = document.createElement("div");
     dragHandle.id = "drag-handle";
+
+    // Add drag functionality using Tauri's window API
+    dragHandle.addEventListener("mousedown", async (e) => {
+      e.preventDefault();
+      const { getCurrentWindow } = await import("@tauri-apps/api/window");
+      await getCurrentWindow().startDragging();
+    });
+
     app.appendChild(dragHandle);
 
     // Create terminal viewport region
