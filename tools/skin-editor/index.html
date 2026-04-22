@@ -33,7 +33,10 @@
             <div id="canvas-instructions">
               Load a chrome.png file to begin
             </div>
-            <canvas id="editor-canvas"></canvas>
+            <div id="canvas-stage">
+              <canvas id="editor-canvas"></canvas>
+              <div id="regions-container"></div>
+            </div>
           </div>
           <div class="canvas-info">
             <span id="mouse-coords">x: 0, y: 0</span>
@@ -133,7 +136,11 @@
             </div>
             <div class="shortcut-item">
               <kbd>Escape</kbd>
-              <span>Deselect region</span>
+              <span>Deselect region / Exit preview</span>
+            </div>
+            <div class="shortcut-item">
+              <kbd>P</kbd>
+              <span>Toggle preview mode</span>
             </div>
             <div class="shortcut-item">
               <kbd>?</kbd>
@@ -146,5 +153,6 @@
     </div>
 
     <button id="help-button" class="help-button" title="Show keyboard shortcuts">?</button>
+    <button id="exit-preview-button" class="exit-preview-button" style="display: none;">Exit Preview (ESC)</button>
   </body>
 </html>

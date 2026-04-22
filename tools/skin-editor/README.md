@@ -38,12 +38,12 @@ Open `http://localhost:3000` (or the port shown in terminal).
    - `memory-context` - Recent memory fragments
    - `activity-feed` - Live event stream
    - `decorative` - No content, visual only
-5. **Preview**: Click "Preview Mode" for fullscreen Terminai app mock
-   - **Fullscreen black background** - see skin in isolation
-   - **CRT scanline effects** - authentic retro aesthetic
-   - **Live agent data** - activity feed, token counts, memory fragments
-   - **Realistic timing** - events every 3-8 seconds, just like real usage
-   - **Exit**: Press `Escape` or click "Exit Preview" button
+5. **Preview**: Click "Preview Mode" or press `P` for WYSIWYG preview
+   - **Checkerboard background** - standard transparency indicator
+   - **Runtime renderers** - uses same region renderers as actual Terminai app
+   - **Stub agent data** - realistic activity feed, token counts, memory fragments
+   - **Out-of-bounds warnings** - red outline if region is outside chrome bounds
+   - **Exit**: Press `Escape`, `P`, or click "Exit Preview" button
 6. **Export**: Click "Export Manifest" to download `manifest.json`
 7. **Deploy**: Copy chrome.png + manifest.json to `/public/skins/your-skin-name/`
 
@@ -61,6 +61,7 @@ Open `http://localhost:3000` (or the port shown in terminal).
 | **Arrow keys** | Move region by 1px |
 | **Shift + Arrow keys** | Move region by grid step (5px) |
 | **Escape** | Deselect region / exit preview / close help |
+| **P** | Toggle preview mode |
 | **?** | Toggle help overlay |
 
 ## Region Types

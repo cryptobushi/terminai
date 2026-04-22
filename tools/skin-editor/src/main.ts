@@ -3,9 +3,9 @@
  */
 
 import type { EditorState, Region, SkinManifest, ResizeHandle } from "./types";
-import { StubHermesDataSource } from "./preview/stub-hermes";
-import { previewRenderers } from "./preview/renderers";
-import type { DataSource } from "./preview/data-types";
+import { StubHermesDataSource } from "@terminai/data/stub-hermes";
+import { regionRegistry, registerBuiltInRenderers } from "@terminai/regions";
+import type { DataSource } from "@terminai/data/types";
 import "./style.css";
 
 class SkinEditor {
@@ -32,13 +32,20 @@ class SkinEditor {
   private canvas!: HTMLCanvasElement;
   private ctx!: CanvasRenderingContext2D;
   private readonly HANDLE_SIZE = 8;
-  private previewDataSource: DataSource | null = null;
-  private previewCleanups: Array<() => void> = [];
-  private previewContainer: HTMLDivElement | null = null;
+  private regionsContainer!: HTMLElement;
+  private regionCleanups: Array<() => void> = [];
+  private dataSource: DataSource | null = null;
 
   constructor() {
     this.canvas = document.getElementById("editor-canvas") as HTMLCanvasElement;
     this.ctx = this.canvas.getContext("2d")!;
+    this.regionsContainer = document.getElementById("regions-container") as HTMLElement;
+
+    // Register runtime renderers
+    registerBuiltInRenderers();
+
+    // Initialize stub data source
+    this.dataSource = new StubHermesDataSource();
 
     this.initializeEventListeners();
   }
@@ -86,6 +93,9 @@ class SkinEditor {
 
     // Help button
     document.getElementById("help-button")?.addEventListener("click", () => this.toggleHelp());
+
+    // Exit preview button
+    document.getElementById("exit-preview-button")?.addEventListener("click", () => this.togglePreview());
   }
 
   private toggleHelp(): void {
@@ -163,6 +173,15 @@ class SkinEditor {
       propsPanel.style.display = "none";
       this.render();
       return;
+    }
+
+    // 'P' to toggle preview mode (if chrome is loaded)
+    if ((e.key === "p" || e.key === "P") && !e.ctrlKey && !e.metaKey && !e.altKey) {
+      if (this.state.chromeImage) {
+        e.preventDefault();
+        this.togglePreview();
+        return;
+      }
     }
 
     // Block all other shortcuts in preview mode
@@ -290,6 +309,7 @@ class SkinEditor {
   }
 
   private handleCanvasMouseDown(e: MouseEvent): void {
+    // Disable all canvas interaction in preview mode
     if (this.state.previewMode) return;
 
     const rect = this.canvas.getBoundingClientRect();
@@ -614,7 +634,15 @@ class SkinEditor {
       this.ctx.drawImage(this.state.chromeImage, 0, 0);
     }
 
-    // Draw grid if snap is enabled
+    // Render actual region DOMs (BOTH edit and preview modes)
+    this.renderRegionDOMs();
+
+    // Skip all editor decorations in preview mode
+    if (this.state.previewMode) {
+      return;
+    }
+
+    // Draw grid if snap is enabled (EDIT MODE ONLY)
     if (this.state.snapToGrid && this.state.chromeImage) {
       this.ctx.strokeStyle = "rgba(100, 100, 100, 0.2)";
       this.ctx.lineWidth = 1;
@@ -632,7 +660,7 @@ class SkinEditor {
       }
     }
 
-    // Draw regions
+    // Draw region overlays (EDIT MODE ONLY)
     this.state.regions.forEach((region) => {
       const isSelected = region === this.state.selectedRegion;
 
@@ -657,6 +685,38 @@ class SkinEditor {
       if (isSelected) {
         this.drawResizeHandles(region);
       }
+    });
+  }
+
+  private renderRegionDOMs(): void {
+    // Clean up existing region renderers
+    this.regionCleanups.forEach(cleanup => cleanup());
+    this.regionCleanups = [];
+    this.regionsContainer.innerHTML = "";
+
+    // Mount all regions using runtime renderer registry
+    this.state.regions.forEach((region) => {
+      const renderer = regionRegistry.get(region.type);
+      if (!renderer || !this.dataSource) {
+        console.warn(`[Editor] No renderer found for region type: ${region.type}`);
+        return;
+      }
+
+      const container = document.createElement("div");
+      container.style.position = "absolute";
+      container.style.left = `${region.rect.x}px`;
+      container.style.top = `${region.rect.y}px`;
+      container.style.width = `${region.rect.width}px`;
+      container.style.height = `${region.rect.height}px`;
+      container.style.overflow = "hidden";
+      container.style.boxSizing = "border-box";
+      container.style.pointerEvents = "auto";
+      container.style.zIndex = (region.zIndex !== undefined ? region.zIndex : 10).toString();
+
+      const cleanup = renderer.mount(container, region, this.dataSource);
+      this.regionCleanups.push(cleanup);
+
+      this.regionsContainer.appendChild(container);
     });
   }
 
@@ -724,131 +784,36 @@ class SkinEditor {
   }
 
   private enterPreviewMode(): void {
-    // Hide canvas and other UI elements
-    this.canvas.style.display = "none";
+    // Add preview-mode class to hide editor UI via CSS
+    document.body.classList.add("preview-mode");
 
-    // Hide canvas info bar
-    const canvasInfo = document.querySelector(".canvas-info") as HTMLElement;
-    if (canvasInfo) canvasInfo.style.display = "none";
+    // Show exit preview button
+    const exitBtn = document.getElementById("exit-preview-button");
+    if (exitBtn) {
+      exitBtn.style.display = "block";
+    }
 
-    // Create fullscreen preview overlay
-    const previewOverlay = document.createElement("div");
-    previewOverlay.id = "preview-overlay";
-    previewOverlay.style.cssText = `
-      position: fixed;
-      top: 0;
-      left: 0;
-      width: 100vw;
-      height: 100vh;
-      background: #000000;
-      z-index: 9999;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-    `;
+    // Deselect any selected region
+    this.state.selectedRegion = null;
 
-    // Create app container (mimics terminai window)
-    this.previewContainer = document.createElement("div");
-    this.previewContainer.id = "preview-container";
-    this.previewContainer.className = "terminai-preview";
-    this.previewContainer.style.cssText = `
-      position: relative;
-      width: ${this.state.chromeImage?.width}px;
-      height: ${this.state.chromeImage?.height}px;
-      box-shadow: 0 10px 40px rgba(0, 0, 0, 0.8);
-    `;
+    // Re-render canvas without editor decorations
+    this.render();
 
-    // Add chrome image as background
-    const chromeImg = document.createElement("img");
-    chromeImg.style.cssText = `
-      position: absolute;
-      top: 0;
-      left: 0;
-      width: 100%;
-      height: 100%;
-      pointer-events: none;
-      user-select: none;
-      z-index: 0;
-    `;
-    chromeImg.src = this.canvas.toDataURL();
-    this.previewContainer.appendChild(chromeImg);
-
-    // Add CRT scanline overlay
-    const scanlineOverlay = document.createElement("div");
-    scanlineOverlay.style.cssText = `
-      position: absolute;
-      top: 0;
-      left: 0;
-      width: 100%;
-      height: 100%;
-      pointer-events: none;
-      z-index: 100;
-      background: repeating-linear-gradient(
-        0deg,
-        rgba(0, 0, 0, 0.03) 0px,
-        rgba(0, 0, 0, 0.03) 1px,
-        transparent 1px,
-        transparent 2px
-      );
-      animation: scanline 8s linear infinite;
-      opacity: 0.4;
-    `;
-    this.previewContainer.appendChild(scanlineOverlay);
-
-    previewOverlay.appendChild(this.previewContainer);
-    document.body.appendChild(previewOverlay);
-
-    // Initialize data source
-    this.previewDataSource = new StubHermesDataSource();
-
-    // Mount all regions
-    this.state.regions.forEach((region) => {
-      const renderer = previewRenderers[region.type];
-      if (!renderer || !this.previewContainer || !this.previewDataSource) return;
-
-      const container = document.createElement("div");
-      container.style.position = "absolute";
-      container.style.left = `${region.rect.x}px`;
-      container.style.top = `${region.rect.y}px`;
-      container.style.width = `${region.rect.width}px`;
-      container.style.height = `${region.rect.height}px`;
-      if (region.zIndex !== undefined) {
-        container.style.zIndex = region.zIndex.toString();
-      }
-
-      const cleanup = renderer.mount(container, region, this.previewDataSource);
-      this.previewCleanups.push(cleanup);
-
-      this.previewContainer.appendChild(container);
-    });
-
-    console.log("[Editor] Preview mode: mounted", this.state.regions.length, "regions");
+    console.log("[Editor] Preview mode: entered");
   }
 
   private exitPreviewMode(): void {
-    // Clean up preview renderers
-    this.previewCleanups.forEach(cleanup => cleanup());
-    this.previewCleanups = [];
+    // Remove preview-mode class to restore editor UI
+    document.body.classList.remove("preview-mode");
 
-    // Dispose data source
-    if (this.previewDataSource) {
-      this.previewDataSource.dispose();
-      this.previewDataSource = null;
+    // Hide exit preview button
+    const exitBtn = document.getElementById("exit-preview-button");
+    if (exitBtn) {
+      exitBtn.style.display = "none";
     }
 
-    // Remove preview overlay
-    const previewOverlay = document.getElementById("preview-overlay");
-    if (previewOverlay) {
-      previewOverlay.remove();
-    }
-
-    this.previewContainer = null;
-
-    // Show canvas and UI again
-    this.canvas.style.display = "block";
-
-    const canvasInfo = document.querySelector(".canvas-info") as HTMLElement;
-    if (canvasInfo) canvasInfo.style.display = "flex";
+    // Re-render canvas with editor decorations
+    this.render();
 
     console.log("[Editor] Preview mode: exited");
   }

@@ -126,10 +126,24 @@ body {
   text-align: center;
 }
 
+#canvas-stage {
+  position: relative;
+  display: inline-block;
+}
+
 #editor-canvas {
   display: block;
   cursor: crosshair;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+}
+
+#regions-container {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
 }
 
 .canvas-info {
@@ -307,20 +321,32 @@ body {
   background: transparent;
 }
 
-/* Exit preview hint */
-#preview-overlay::before {
-  content: 'Press ESC to exit preview';
-  position: fixed;
-  top: 20px;
-  left: 50%;
-  transform: translateX(-50%);
-  padding: 8px 16px;
-  background: rgba(0, 0, 0, 0.8);
-  color: #ffffff;
-  font-size: 12px;
-  border-radius: 4px;
-  z-index: 10000;
-  animation: fadeIn 0.5s ease-out;
+/* Preview mode: hide all editor UI */
+.preview-mode .toolbar {
+  display: none;
+}
+
+.preview-mode .inspector-panel {
+  display: none;
+}
+
+.preview-mode .canvas-info {
+  display: none;
+}
+
+.preview-mode .help-button {
+  display: none;
+}
+
+/* Preview mode: change canvas background to checkerboard */
+.preview-mode .canvas-panel {
+  background:
+    repeating-conic-gradient(#cccccc 0% 25%, #ffffff 0% 50%)
+    50% / 20px 20px;
+}
+
+.preview-mode #canvas-wrapper {
+  background: transparent;
 }
 
 /* Scrollbar styling */
@@ -364,6 +390,30 @@ body {
 .help-button:hover {
   background: var(--accent-hover);
   transform: scale(1.1);
+}
+
+/* Exit preview button */
+.exit-preview-button {
+  position: fixed;
+  top: 20px;
+  right: 20px;
+  padding: 12px 24px;
+  background: var(--danger-color);
+  border: none;
+  border-radius: 6px;
+  color: white;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  transition: all 0.2s;
+  z-index: 2000;
+}
+
+.exit-preview-button:hover {
+  background: #cc0000;
+  transform: translateY(-2px);
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.4);
 }
 
 /* Help overlay */

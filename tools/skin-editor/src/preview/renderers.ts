@@ -172,29 +172,12 @@ export const memoryContextRenderer: PreviewRenderer = {
   },
 };
 
-// Terminal Renderer (simplified - no actual terminal)
+// Terminal Renderer (simplified - just black fill)
 export const terminalRenderer: PreviewRenderer = {
   mount(element: HTMLElement, region: Region, dataSource: DataSource): () => void {
     element.style.cssText = `
       background: #000000;
-      border: 1px solid rgba(255, 255, 255, 0.1);
-      border-radius: 4px;
       overflow: hidden;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-family: Monaco, "Courier New", monospace;
-      font-size: 12px;
-      color: #00ff00;
-    `;
-
-    element.innerHTML = `
-      <div style="text-align: center; opacity: 0.5;">
-        <div style="margin-bottom: 8px;">Terminal Display</div>
-        <div style="font-size: 10px; color: #888;">
-          (Live terminal in actual app)
-        </div>
-      </div>
     `;
 
     return () => {};
