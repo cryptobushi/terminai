@@ -46,7 +46,7 @@ export class TerminalSession {
     this.resizeObserver = new ResizeObserver(() => {
       try {
         this.fitAddon.fit();
-        const dims = this.terminal.getDimensions();
+        const dims = this.fitAddon.proposeDimensions();
         if (dims) {
           console.log(`[Terminal] Resizing PTY to ${dims.cols}x${dims.rows}`);
           // Fire and forget - don't await
@@ -94,7 +94,7 @@ export class TerminalSession {
     console.log("[Terminal] PTY session created");
 
     // Get initial terminal dimensions and resize PTY
-    const dims = this.terminal.getDimensions();
+    const dims = this.fitAddon.proposeDimensions();
     if (dims) {
       console.log(`[Terminal] Initial dimensions: ${dims.cols}x${dims.rows}`);
       await this.resize(dims.rows, dims.cols);

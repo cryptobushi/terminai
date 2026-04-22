@@ -21,13 +21,21 @@
         "alwaysOnTop": false,
         "resizable": true,
         "fullscreen": false,
-        "skipTaskbar": false,
-        "titleBarStyle": "Overlay",
-        "hiddenTitle": true
+        "skipTaskbar": false
       }
     ],
     "security": {
-      "csp": null
+      "csp": null,
+      "capabilities": [
+        {
+          "identifier": "main-window",
+          "windows": ["main"],
+          "permissions": [
+            "core:window:allow-start-dragging",
+            "core:default"
+          ]
+        }
+      ]
     },
     "macOSPrivateApi": true
   },

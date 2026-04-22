@@ -54,23 +54,12 @@ class TerminaiApp {
     app.style.height = "100vh";
 
     // Apply skin shape and background
-    app.style.clipPath = this.skin.visual.shape;
+    // TEMPORARILY DISABLED FOR DEBUGGING DRAG
+    // app.style.clipPath = this.skin.visual.shape;
     app.style.background = this.skin.visual.background;
+    app.style.borderRadius = "20px"; // Temporary rounded corners instead
 
-    // Create drag handle at the top
-    const dragHandle = document.createElement("div");
-    dragHandle.id = "drag-handle";
-
-    // Add drag functionality using Tauri's window API
-    dragHandle.addEventListener("mousedown", async (e) => {
-      e.preventDefault();
-      const { getCurrentWindow } = await import("@tauri-apps/api/window");
-      await getCurrentWindow().startDragging();
-    });
-
-    app.appendChild(dragHandle);
-
-    // Create terminal viewport region
+    // Create terminal viewport region FIRST
     const terminalContainer = document.createElement("div");
     terminalContainer.id = "terminal-container";
     terminalContainer.style.position = "absolute";
@@ -94,6 +83,40 @@ class TerminaiApp {
     });
 
     app.appendChild(terminalContainer);
+
+    // Add drag handle LAST so it's on top
+    const dragHandle = document.createElement("div");
+    dragHandle.id = "drag-handle";
+
+    // Add test text to verify it's visible
+    dragHandle.textContent = "DRAG HERE";
+    dragHandle.style.color = "white";
+    dragHandle.style.textAlign = "center";
+    dragHandle.style.lineHeight = "60px";
+    dragHandle.style.fontWeight = "bold";
+
+    // Set up manual window dragging
+    this.setupWindowDragging(dragHandle);
+
+    app.appendChild(dragHandle);
+  }
+
+  /**
+   * Set up window dragging for a given element
+   */
+  private setupWindowDragging(element: HTMLElement): void {
+    element.addEventListener("mousedown", async (e: MouseEvent) => {
+      e.preventDefault();
+      console.log("[Drag] Mouse down - starting drag");
+      try {
+        const { getCurrentWindow } = await import("@tauri-apps/api/window");
+        const currentWindow = getCurrentWindow();
+        await currentWindow.startDragging();
+        console.log("[Drag] Started dragging");
+      } catch (error) {
+        console.error("[Drag] Failed to start dragging:", error);
+      }
+    });
   }
 
   /**

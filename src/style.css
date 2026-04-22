@@ -29,7 +29,7 @@ body {
 #app {
   position: relative;
   /* Dimensions and shape are set dynamically by the skin */
-  -webkit-app-region: no-drag; /* Default to no-drag */
+  -webkit-app-region: no-drag;
 }
 
 /* Drag handle area at the top */
@@ -39,12 +39,13 @@ body {
   left: 0;
   width: 100%;
   height: 60px;
-  -webkit-app-region: drag;
   cursor: move;
-  z-index: 100; /* Very high to ensure it's on top */
-  pointer-events: auto; /* Ensure it captures pointer events */
+  z-index: 9999;
+  pointer-events: auto;
   /* Temporary visual indicator - remove once working */
-  background: rgba(255, 0, 0, 0.2);
+  background: rgba(255, 0, 0, 0.5);
+  user-select: none;
+  -webkit-app-region: no-drag; /* Allow JavaScript event handlers */
 }
 
 /* Terminal container - xterm.js will fill this */
