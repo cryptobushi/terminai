@@ -25,6 +25,7 @@ body {
 #app {
   position: relative;
   /* Dimensions and shape are set dynamically by the skin */
+  /* Entire app is draggable by default */
   -webkit-app-region: drag;
 }
 

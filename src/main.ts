@@ -49,11 +49,17 @@ class TerminaiApp {
   private renderSkin(): void {
     const app = document.getElementById("app") as HTMLElement;
 
-    // Apply skin dimensions and shape
+    // Apply skin dimensions
     app.style.width = `${this.skin.visual.width}px`;
     app.style.height = `${this.skin.visual.height}px`;
-    app.style.clipPath = this.skin.visual.shape;
+
+    // For now, use rounded corners instead of clip-path for better transparency
+    // TODO: Implement true shaped windows via Tauri APIs
+    app.style.borderRadius = "40px";
     app.style.background = this.skin.visual.background;
+
+    // Add shadow for better visibility
+    app.style.boxShadow = "0 10px 40px rgba(0, 0, 0, 0.3)";
 
     // Create terminal viewport region
     const terminalContainer = document.createElement("div");
