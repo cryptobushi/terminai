@@ -100,7 +100,7 @@ body {
 /* Canvas Panel */
 .canvas-panel {
   flex: 1;
-  background: var(--bg-secondary);
+  background: transparent;
   display: flex;
   flex-direction: column;
   overflow: auto;
@@ -114,6 +114,7 @@ body {
   align-items: center;
   justify-content: center;
   padding: 20px;
+  background: transparent;
 }
 
 #canvas-instructions {
@@ -129,21 +130,31 @@ body {
 #canvas-stage {
   position: relative;
   display: inline-block;
+  background: transparent;
 }
 
-#editor-canvas {
+#chrome-image {
   display: block;
-  cursor: crosshair;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
-}
-
-#regions-container {
   position: absolute;
   top: 0;
   left: 0;
-  width: 100%;
-  height: 100%;
+  z-index: 10;
   pointer-events: none;
+  background: transparent;
+}
+
+#editor-canvas {
+  position: absolute;
+  top: 0;
+  left: 0;
+  cursor: crosshair;
+  z-index: 100;
+  background: transparent;
+}
+
+/* Hide canvas in preview mode since it only draws editor decorations */
+.preview-mode #editor-canvas {
+  display: none;
 }
 
 .canvas-info {
@@ -338,15 +349,11 @@ body {
   display: none;
 }
 
-/* Preview mode: change canvas background to checkerboard */
-.preview-mode .canvas-panel {
+/* Preview mode: change body background to checkerboard */
+.preview-mode {
   background:
     repeating-conic-gradient(#cccccc 0% 25%, #ffffff 0% 50%)
     50% / 20px 20px;
-}
-
-.preview-mode #canvas-wrapper {
-  background: transparent;
 }
 
 /* Scrollbar styling */

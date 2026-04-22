@@ -31,15 +31,17 @@ class SkinEditor {
 
   private canvas!: HTMLCanvasElement;
   private ctx!: CanvasRenderingContext2D;
+  private chromeImg!: HTMLImageElement;
+  private canvasStage!: HTMLElement;
   private readonly HANDLE_SIZE = 8;
-  private regionsContainer!: HTMLElement;
   private regionCleanups: Array<() => void> = [];
   private dataSource: DataSource | null = null;
 
   constructor() {
     this.canvas = document.getElementById("editor-canvas") as HTMLCanvasElement;
     this.ctx = this.canvas.getContext("2d")!;
-    this.regionsContainer = document.getElementById("regions-container") as HTMLElement;
+    this.chromeImg = document.getElementById("chrome-image") as HTMLImageElement;
+    this.canvasStage = document.getElementById("canvas-stage") as HTMLElement;
 
     // Register runtime renderers
     registerBuiltInRenderers();
@@ -273,8 +275,19 @@ class SkinEditor {
     const img = new Image();
     img.onload = () => {
       this.state.chromeImage = img;
+
+      // Set chrome img element
+      this.chromeImg.src = img.src;
+      this.chromeImg.style.display = "block";
+
+      // Size canvas to match for editor overlays
       this.canvas.width = img.width;
       this.canvas.height = img.height;
+
+      // Size canvas-stage to contain everything
+      this.canvasStage.style.width = `${img.width}px`;
+      this.canvasStage.style.height = `${img.height}px`;
+
       this.render();
 
       // Hide instructions
@@ -629,11 +642,6 @@ class SkinEditor {
   private render(): void {
     this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
 
-    // Draw chrome image
-    if (this.state.chromeImage) {
-      this.ctx.drawImage(this.state.chromeImage, 0, 0);
-    }
-
     // Render actual region DOMs (BOTH edit and preview modes)
     this.renderRegionDOMs();
 
@@ -692,7 +700,14 @@ class SkinEditor {
     // Clean up existing region renderers
     this.regionCleanups.forEach(cleanup => cleanup());
     this.regionCleanups = [];
-    this.regionsContainer.innerHTML = "";
+
+    // Remove all region elements from canvas-stage (keep chrome and canvas)
+    const children = Array.from(this.canvasStage.children);
+    children.forEach(child => {
+      if (child !== this.chromeImg && child !== this.canvas) {
+        child.remove();
+      }
+    });
 
     // Mount all regions using runtime renderer registry
     this.state.regions.forEach((region) => {
@@ -703,6 +718,8 @@ class SkinEditor {
       }
 
       const container = document.createElement("div");
+      container.className = "region-layer";
+      container.dataset.regionId = region.id;
       container.style.position = "absolute";
       container.style.left = `${region.rect.x}px`;
       container.style.top = `${region.rect.y}px`;
@@ -711,12 +728,12 @@ class SkinEditor {
       container.style.overflow = "hidden";
       container.style.boxSizing = "border-box";
       container.style.pointerEvents = "auto";
-      container.style.zIndex = (region.zIndex !== undefined ? region.zIndex : 10).toString();
+      container.style.zIndex = (region.zIndex !== undefined ? region.zIndex : 5).toString();
 
       const cleanup = renderer.mount(container, region, this.dataSource);
       this.regionCleanups.push(cleanup);
 
-      this.regionsContainer.appendChild(container);
+      this.canvasStage.appendChild(container);
     });
   }
 
