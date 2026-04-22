@@ -1,0 +1,105 @@
+/**
+ * Terminai styles
+ */
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  /* Transparent background for frameless window */
+  background: transparent;
+  font-family: "SF Mono", "Monaco", "Inconsolata", "Fira Code", "Droid Sans Mono",
+    "Source Code Pro", monospace;
+}
+
+#app {
+  position: relative;
+  /* Dimensions and shape are set dynamically by the skin */
+  -webkit-app-region: drag;
+}
+
+/* Terminal container */
+#terminal-container {
+  display: flex;
+  flex-direction: column;
+  background: rgba(0, 0, 0, 0.8);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 4px;
+  overflow: hidden;
+  -webkit-app-region: no-drag;
+}
+
+/* Terminal output */
+#terminal-output {
+  flex: 1;
+  padding: 10px;
+  color: #00ff00;
+  font-size: 14px;
+  font-family: "SF Mono", "Monaco", monospace;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  word-wrap: break-word;
+}
+
+/* Custom scrollbar */
+#terminal-output::-webkit-scrollbar {
+  width: 8px;
+}
+
+#terminal-output::-webkit-scrollbar-track {
+  background: rgba(0, 0, 0, 0.2);
+}
+
+#terminal-output::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.3);
+  border-radius: 4px;
+}
+
+#terminal-output::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.5);
+}
+
+/* Terminal input */
+#terminal-input {
+  width: 100%;
+  padding: 8px 10px;
+  background: rgba(0, 0, 0, 0.6);
+  border: none;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  color: #00ff00;
+  font-size: 14px;
+  font-family: "SF Mono", "Monaco", monospace;
+  outline: none;
+}
+
+#terminal-input::placeholder {
+  color: rgba(0, 255, 0, 0.5);
+}
+
+/* Action buttons */
+.action-button {
+  padding: 4px 8px;
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  border-radius: 4px;
+  color: white;
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.2s;
+  -webkit-app-region: no-drag;
+}
+
+.action-button:hover {
+  background: rgba(255, 255, 255, 0.2);
+  border-color: rgba(255, 255, 255, 0.5);
+}
+
+.action-button:active {
+  transform: scale(0.95);
+}
