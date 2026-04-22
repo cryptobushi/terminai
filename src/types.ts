@@ -3,11 +3,40 @@
  */
 
 /**
+ * Region types supported by the renderer
+ */
+export type RegionType =
+  | "terminal"
+  | "agent-status"
+  | "memory-context"
+  | "activity-feed"
+  | "decorative";
+
+/**
+ * Region definition - a functional zone within the skin
+ */
+export interface Region {
+  /** Unique ID for this region */
+  id: string;
+
+  /** Type of region */
+  type: RegionType;
+
+  /** Position and size */
+  rect: {
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+  };
+
+  /** Optional z-index for layering */
+  zIndex?: number;
+}
+
+/**
  * SkinManifest defines the structure of a skin.
- * Even the placeholder skin satisfies this interface.
- *
- * This is the seam that allows skin swapping: loading a different skin
- * means swapping a SkinManifest object, not editing rendering logic.
+ * Day 5: Extended to support multiple functional regions.
  */
 export interface SkinManifest {
   /** Unique identifier for the skin */
@@ -25,18 +54,24 @@ export interface SkinManifest {
     width: number;
     height: number;
 
-    /** Shape definition (SVG path, CSS clip-path, or similar) */
-    shape: string;
+    /** Shape definition (SVG path, CSS clip-path, or similar) - optional if using chromeImage alpha */
+    shape?: string;
 
-    /** Background styling */
-    background: string;
+    /** Background styling - optional if using chromeImage */
+    background?: string;
 
     /** Optional background image */
     backgroundImage?: string;
+
+    /** Chrome image (PNG with alpha channel for shape) - for real WMP skins */
+    chromeImage?: string;
   };
 
-  /** Terminal viewport region within the skin */
-  terminalRegion: {
+  /** Functional regions within the skin */
+  regions: Region[];
+
+  /** DEPRECATED: Legacy single terminal region - use regions array instead */
+  terminalRegion?: {
     x: number;
     y: number;
     width: number;

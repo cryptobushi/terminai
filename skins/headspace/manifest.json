@@ -1,0 +1,43 @@
+{
+  "id": "headspace",
+  "name": "Headspace Beta",
+  "version": "1.0.0",
+  "author": "Microsoft Corporation",
+  "visual": {
+    "width": 760,
+    "height": 394,
+    "chromeImage": "chrome.png"
+  },
+  "terminalRegion": {
+    "x": 275,
+    "y": 72,
+    "width": 208,
+    "height": 132
+  },
+  "ledRegion": {
+    "x": 40,
+    "y": 6,
+    "width": 150,
+    "height": 20
+  },
+  "actions": [
+    {
+      "id": "minimize",
+      "label": "Minimize",
+      "position": {
+        "x": 362,
+        "y": 4
+      },
+      "type": "minimize"
+    },
+    {
+      "id": "close",
+      "label": "Close",
+      "position": {
+        "x": 382,
+        "y": 4
+      },
+      "type": "close"
+    }
+  ]
+}

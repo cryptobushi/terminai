@@ -14,12 +14,12 @@
     "windows": [
       {
         "title": "Terminai",
-        "width": 600,
-        "height": 400,
+        "width": 760,
+        "height": 394,
         "decorations": false,
         "transparent": true,
         "alwaysOnTop": false,
-        "resizable": true,
+        "resizable": false,
         "fullscreen": false,
         "skipTaskbar": false
       }

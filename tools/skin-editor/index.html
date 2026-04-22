@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Terminai Skin Editor</title>
+    <script type="module" src="/src/main.ts" defer></script>
+  </head>
+
+  <body>
+    <div id="app">
+      <header class="toolbar">
+        <h1>Terminai Skin Editor</h1>
+        <div class="toolbar-actions">
+          <label class="btn">
+            <input type="file" id="load-chrome" accept="image/png" style="display: none;" />
+            Load Chrome PNG
+          </label>
+          <label class="btn">
+            <input type="file" id="load-manifest" accept="application/json" style="display: none;" />
+            Import Manifest
+          </label>
+          <button id="toggle-snap" class="btn" disabled>Snap: ON</button>
+          <button id="export-manifest" class="btn" disabled>Export Manifest</button>
+          <button id="toggle-preview" class="btn" disabled>Preview Mode</button>
+        </div>
+      </header>
+
+      <div class="editor-container">
+        <!-- Left: Canvas -->
+        <div class="canvas-panel">
+          <div id="canvas-wrapper">
+            <div id="canvas-instructions">
+              Load a chrome.png file to begin
+            </div>
+            <canvas id="editor-canvas"></canvas>
+          </div>
+          <div class="canvas-info">
+            <span id="mouse-coords">x: 0, y: 0</span>
+            <span id="drawing-coords"></span>
+          </div>
+        </div>
+
+        <!-- Right: Region Inspector -->
+        <div class="inspector-panel">
+          <h2>Regions</h2>
+          <div id="region-list" class="region-list">
+            <div class="empty-state">No regions yet. Click and drag on the canvas to create one.</div>
+          </div>
+
+          <div id="region-properties" class="region-properties" style="display: none;">
+            <h3>Properties</h3>
+            <div class="form-group">
+              <label>ID:</label>
+              <input type="text" id="prop-id" />
+            </div>
+            <div class="form-group">
+              <label>Type:</label>
+              <select id="prop-type">
+                <option value="terminal">terminal</option>
+                <option value="agent-status">agent-status</option>
+                <option value="memory-context">memory-context</option>
+                <option value="activity-feed">activity-feed</option>
+                <option value="decorative">decorative</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label>Position:</label>
+              <div class="input-row">
+                <input type="number" id="prop-x" placeholder="x" />
+                <input type="number" id="prop-y" placeholder="y" />
+              </div>
+            </div>
+            <div class="form-group">
+              <label>Size:</label>
+              <div class="input-row">
+                <input type="number" id="prop-width" placeholder="width" />
+                <input type="number" id="prop-height" placeholder="height" />
+              </div>
+            </div>
+            <div class="form-group">
+              <label>Z-Index:</label>
+              <input type="number" id="prop-zindex" value="10" />
+            </div>
+            <button id="delete-region" class="btn btn-danger">Delete Region</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Help overlay -->
+      <div id="help-overlay" class="help-overlay" style="display: none;">
+        <div class="help-content">
+          <h2>Keyboard Shortcuts</h2>
+          <div class="shortcuts-grid">
+            <div class="shortcut-item">
+              <kbd>Click + Drag</kbd>
+              <span>Draw new region</span>
+            </div>
+            <div class="shortcut-item">
+              <kbd>Click region</kbd>
+              <span>Select region</span>
+            </div>
+            <div class="shortcut-item">
+              <kbd>Drag region</kbd>
+              <span>Move selected region</span>
+            </div>
+            <div class="shortcut-item">
+              <kbd>Drag handles</kbd>
+              <span>Resize region</span>
+            </div>
+            <div class="shortcut-item">
+              <kbd>Delete/Backspace</kbd>
+              <span>Delete selected region</span>
+            </div>
+            <div class="shortcut-item">
+              <kbd>Cmd/Ctrl + Z</kbd>
+              <span>Undo</span>
+            </div>
+            <div class="shortcut-item">
+              <kbd>Cmd/Ctrl + Shift + Z</kbd>
+              <span>Redo</span>
+            </div>
+            <div class="shortcut-item">
+              <kbd>Arrow keys</kbd>
+              <span>Move region by 1px</span>
+            </div>
+            <div class="shortcut-item">
+              <kbd>Shift + Arrow keys</kbd>
+              <span>Move by grid step (5px)</span>
+            </div>
+            <div class="shortcut-item">
+              <kbd>Escape</kbd>
+              <span>Deselect region</span>
+            </div>
+            <div class="shortcut-item">
+              <kbd>?</kbd>
+              <span>Toggle this help</span>
+            </div>
+          </div>
+          <button class="btn" onclick="document.getElementById('help-overlay').style.display='none'">Close</button>
+        </div>
+      </div>
+    </div>
+
+    <button id="help-button" class="help-button" title="Show keyboard shortcuts">?</button>
+  </body>
+</html>

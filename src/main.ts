@@ -1,21 +1,24 @@
 /**
  * Terminai - Main application entry point
  *
- * Day 2: Fixed ANSI escape rendering, removed separate input field,
- * xterm.js now handles all terminal I/O
+ * Day 5: Multi-region rendering with plugin-style dispatch
  */
 
-import { placeholderSkin } from "./skins/placeholder";
-import { TerminalSession } from "./terminal";
+import { headspaceSkin } from "./skins/headspace";
 import type { SkinManifest } from "./types";
+import { registerBuiltInRenderers, regionRegistry } from "./regions";
+import { StubHermesDataSource } from "./data/stub-hermes";
+import type { DataSource } from "./data/types";
 import "./style.css";
 
 class TerminaiApp {
   private skin: SkinManifest;
-  private terminal?: TerminalSession;
+  private dataSource: DataSource;
+  private regionCleanups: Array<() => void> = [];
 
   constructor(skin: SkinManifest) {
     this.skin = skin;
+    this.dataSource = new StubHermesDataSource();
   }
 
   /**
@@ -24,21 +27,11 @@ class TerminaiApp {
   async init(): Promise<void> {
     console.log("[Terminai] Initializing with skin:", this.skin.name);
 
-    // Render the skin
+    // Register built-in region renderers
+    registerBuiltInRenderers();
+
+    // Render the skin (this will mount all regions including terminal)
     this.renderSkin();
-
-    // Initialize terminal session
-    const terminalContainer = document.getElementById(
-      "terminal-container"
-    ) as HTMLElement;
-
-    if (!terminalContainer) {
-      throw new Error("Terminal container not found");
-    }
-
-    // xterm.js will take over the container completely
-    this.terminal = new TerminalSession("main", terminalContainer);
-    await this.terminal.init();
 
     console.log("[Terminai] Ready");
   }
@@ -49,56 +42,104 @@ class TerminaiApp {
   private renderSkin(): void {
     const app = document.getElementById("app") as HTMLElement;
 
-    // Make app fill the entire window
-    app.style.width = "100vw";
-    app.style.height = "100vh";
+    console.log("[Terminai] Rendering skin:", this.skin.name);
+    console.log("[Terminai] Skin dimensions:", this.skin.visual.width, "x", this.skin.visual.height);
+    console.log("[Terminai] Regions to render:", this.skin.regions.length);
 
-    // Apply skin shape and background
-    // TEMPORARILY DISABLED FOR DEBUGGING DRAG
-    // app.style.clipPath = this.skin.visual.shape;
-    app.style.background = this.skin.visual.background;
-    app.style.borderRadius = "20px"; // Temporary rounded corners instead
+    // Set app dimensions to match skin
+    app.style.width = `${this.skin.visual.width}px`;
+    app.style.height = `${this.skin.visual.height}px`;
 
-    // Create terminal viewport region FIRST
-    const terminalContainer = document.createElement("div");
-    terminalContainer.id = "terminal-container";
-    terminalContainer.style.position = "absolute";
+    // Debug: Add a border to see the app container
+    app.style.border = "2px solid red";
 
-    // Use percentages for responsive layout
-    terminalContainer.style.left = `${(this.skin.terminalRegion.x / this.skin.visual.width) * 100}%`;
-    terminalContainer.style.top = `${(this.skin.terminalRegion.y / this.skin.visual.height) * 100}%`;
-    terminalContainer.style.width = `${(this.skin.terminalRegion.width / this.skin.visual.width) * 100}%`;
-    terminalContainer.style.height = `${(this.skin.terminalRegion.height / this.skin.visual.height) * 100}%`;
+    console.log("[Terminai] App container size:", app.offsetWidth, "x", app.offsetHeight);
 
-    // Render action buttons (placeholder for now)
-    this.skin.actions.forEach((action) => {
-      const button = document.createElement("button");
-      button.className = "action-button";
-      button.textContent = action.label;
-      button.style.position = "absolute";
-      button.style.left = `${(action.position.x / this.skin.visual.width) * 100}%`;
-      button.style.top = `${(action.position.y / this.skin.visual.height) * 100}%`;
-      button.onclick = () => this.handleAction(action.id);
-      app.appendChild(button);
+    // If we have a chrome image (real WMP skin), render it
+    if (this.skin.visual.chromeImage) {
+      const chromeImg = document.createElement("img");
+      chromeImg.id = "chrome-image";
+      chromeImg.src = this.skin.visual.chromeImage;
+      chromeImg.style.position = "absolute";
+      chromeImg.style.top = "0";
+      chromeImg.style.left = "0";
+      chromeImg.style.width = "100%";
+      chromeImg.style.height = "100%";
+      chromeImg.style.pointerEvents = "none";
+      chromeImg.style.userSelect = "none";
+      chromeImg.style.zIndex = "0";
+
+      // Debug: Log when image loads or fails
+      chromeImg.onload = () => {
+        console.log("[Terminai] Chrome image loaded successfully:", this.skin.visual.chromeImage);
+      };
+      chromeImg.onerror = (e) => {
+        console.error("[Terminai] Chrome image failed to load:", this.skin.visual.chromeImage, e);
+      };
+
+      app.appendChild(chromeImg);
+    } else {
+      // Fallback for old placeholder skin
+      if (this.skin.visual.shape) {
+        app.style.clipPath = this.skin.visual.shape;
+      }
+      if (this.skin.visual.background) {
+        app.style.background = this.skin.visual.background;
+      }
+    }
+
+    // Render all regions using the registry
+    const regionElements: Record<string, HTMLElement> = {};
+
+    this.skin.regions.forEach((region) => {
+      const renderer = regionRegistry.get(region.type);
+      if (!renderer) {
+        console.warn(`[Terminai] No renderer found for region type: ${region.type}`);
+        return;
+      }
+
+      // Create container for this region
+      const container = document.createElement("div");
+      container.id = `region-${region.id}`;
+      container.style.position = "absolute";
+      container.style.left = `${region.rect.x}px`;
+      container.style.top = `${region.rect.y}px`;
+      container.style.width = `${region.rect.width}px`;
+      container.style.height = `${region.rect.height}px`;
+      if (region.zIndex !== undefined) {
+        container.style.zIndex = region.zIndex.toString();
+      }
+
+      // Mount the renderer
+      const cleanup = renderer.mount(container, region, this.dataSource);
+      this.regionCleanups.push(cleanup);
+
+      app.appendChild(container);
+      regionElements[region.id] = container;
     });
 
-    app.appendChild(terminalContainer);
+    // Wire up speaker pulse animation
+    // When activity-feed emits 'activity' event, pulse the speaker regions
+    const activityRegion = regionElements["right-activity"];
+    const leftSpeaker = regionElements["left-memory"];
+    const rightSpeaker = regionElements["right-activity"];
 
-    // Add drag handle LAST so it's on top
-    const dragHandle = document.createElement("div");
-    dragHandle.id = "drag-handle";
+    if (activityRegion && leftSpeaker && rightSpeaker) {
+      activityRegion.addEventListener("activity", () => {
+        // Add pulse class
+        leftSpeaker.classList.add("pulse");
+        rightSpeaker.classList.add("pulse");
 
-    // Add test text to verify it's visible
-    dragHandle.textContent = "DRAG HERE";
-    dragHandle.style.color = "white";
-    dragHandle.style.textAlign = "center";
-    dragHandle.style.lineHeight = "60px";
-    dragHandle.style.fontWeight = "bold";
+        // Remove after animation completes (800ms)
+        setTimeout(() => {
+          leftSpeaker.classList.remove("pulse");
+          rightSpeaker.classList.remove("pulse");
+        }, 800);
+      });
+    }
 
-    // Set up manual window dragging
-    this.setupWindowDragging(dragHandle);
-
-    app.appendChild(dragHandle);
+    // Set up window dragging on the entire app (background area)
+    this.setupWindowDragging(app);
   }
 
   /**
@@ -106,13 +147,21 @@ class TerminaiApp {
    */
   private setupWindowDragging(element: HTMLElement): void {
     element.addEventListener("mousedown", async (e: MouseEvent) => {
+      const target = e.target as HTMLElement;
+
+      // Don't drag if clicking on terminal or buttons
+      if (
+        target.closest("#terminal-container") ||
+        target.closest(".action-button")
+      ) {
+        return;
+      }
+
       e.preventDefault();
-      console.log("[Drag] Mouse down - starting drag");
       try {
         const { getCurrentWindow } = await import("@tauri-apps/api/window");
         const currentWindow = getCurrentWindow();
         await currentWindow.startDragging();
-        console.log("[Drag] Started dragging");
       } catch (error) {
         console.error("[Drag] Failed to start dragging:", error);
       }
@@ -131,6 +180,6 @@ class TerminaiApp {
 
 // Initialize the app when DOM is ready
 window.addEventListener("DOMContentLoaded", async () => {
-  const app = new TerminaiApp(placeholderSkin);
+  const app = new TerminaiApp(headspaceSkin);
   await app.init();
 });

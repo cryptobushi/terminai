@@ -1,0 +1,14 @@
+{
+  "name": "wmz-converter",
+  "version": "0.1.0",
+  "description": "Convert WMP .wmz skins to Terminai format",
+  "type": "module",
+  "scripts": {
+    "convert": "node convert.js"
+  },
+  "dependencies": {
+    "adm-zip": "^0.5.10",
+    "fast-xml-parser": "^4.3.5",
+    "jimp": "^0.22.12"
+  }
+}
