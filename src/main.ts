@@ -1,8 +1,8 @@
 /**
  * Terminai - Main application entry point
  *
- * Day 1 goal: Working plumbing with transparent frameless window,
- * real shell (zsh), and hardcoded placeholder skin.
+ * Day 2: Fixed ANSI escape rendering, removed separate input field,
+ * xterm.js now handles all terminal I/O
  */
 
 import { placeholderSkin } from "./skins/placeholder";
@@ -28,22 +28,17 @@ class TerminaiApp {
     this.renderSkin();
 
     // Initialize terminal session
-    const terminalOutput = document.getElementById(
-      "terminal-output"
+    const terminalContainer = document.getElementById(
+      "terminal-container"
     ) as HTMLElement;
-    const terminalInput = document.getElementById(
-      "terminal-input"
-    ) as HTMLInputElement;
 
-    if (!terminalOutput || !terminalInput) {
-      throw new Error("Terminal elements not found");
+    if (!terminalContainer) {
+      throw new Error("Terminal container not found");
     }
 
-    this.terminal = new TerminalSession("main", terminalOutput);
+    // xterm.js will take over the container completely
+    this.terminal = new TerminalSession("main", terminalContainer);
     await this.terminal.init();
-
-    // Set up input handling
-    this.setupInputHandling(terminalInput);
 
     console.log("[Terminai] Ready");
   }
@@ -69,18 +64,6 @@ class TerminaiApp {
     terminalContainer.style.width = `${this.skin.terminalRegion.width}px`;
     terminalContainer.style.height = `${this.skin.terminalRegion.height}px`;
 
-    // Terminal output area
-    const terminalOutput = document.createElement("div");
-    terminalOutput.id = "terminal-output";
-    terminalContainer.appendChild(terminalOutput);
-
-    // Terminal input area
-    const terminalInput = document.createElement("input");
-    terminalInput.id = "terminal-input";
-    terminalInput.type = "text";
-    terminalInput.placeholder = "Type commands here...";
-    terminalContainer.appendChild(terminalInput);
-
     // Render action buttons (placeholder for now)
     this.skin.actions.forEach((action) => {
       const button = document.createElement("button");
@@ -94,28 +77,6 @@ class TerminaiApp {
     });
 
     app.appendChild(terminalContainer);
-  }
-
-  /**
-   * Set up terminal input handling
-   */
-  private setupInputHandling(input: HTMLInputElement): void {
-    input.addEventListener("keydown", async (e) => {
-      if (e.key === "Enter") {
-        const command = input.value;
-        if (command && this.terminal) {
-          // Write command + newline to PTY
-          await this.terminal.write(command + "\n");
-          input.value = "";
-        }
-      } else if (e.key === "Backspace" || e.key === "Delete") {
-        // Let the input element handle these naturally
-        return;
-      }
-    });
-
-    // Focus input by default
-    input.focus();
   }
 
   /**

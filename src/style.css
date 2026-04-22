@@ -8,6 +8,10 @@
   box-sizing: border-box;
 }
 
+html {
+  background: rgba(0, 0, 0, 0);
+}
+
 body {
   margin: 0;
   padding: 0;
@@ -24,62 +28,13 @@ body {
   -webkit-app-region: drag;
 }
 
-/* Terminal container */
+/* Terminal container - xterm.js will fill this */
 #terminal-container {
-  display: flex;
-  flex-direction: column;
-  background: rgba(0, 0, 0, 0.8);
+  background: #000000; /* Fully opaque black */
   border: 1px solid rgba(255, 255, 255, 0.1);
   border-radius: 4px;
   overflow: hidden;
   -webkit-app-region: no-drag;
-}
-
-/* Terminal output */
-#terminal-output {
-  flex: 1;
-  padding: 10px;
-  color: #00ff00;
-  font-size: 14px;
-  font-family: "SF Mono", "Monaco", monospace;
-  overflow-y: auto;
-  white-space: pre-wrap;
-  word-wrap: break-word;
-}
-
-/* Custom scrollbar */
-#terminal-output::-webkit-scrollbar {
-  width: 8px;
-}
-
-#terminal-output::-webkit-scrollbar-track {
-  background: rgba(0, 0, 0, 0.2);
-}
-
-#terminal-output::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.3);
-  border-radius: 4px;
-}
-
-#terminal-output::-webkit-scrollbar-thumb:hover {
-  background: rgba(255, 255, 255, 0.5);
-}
-
-/* Terminal input */
-#terminal-input {
-  width: 100%;
-  padding: 8px 10px;
-  background: rgba(0, 0, 0, 0.6);
-  border: none;
-  border-top: 1px solid rgba(255, 255, 255, 0.1);
-  color: #00ff00;
-  font-size: 14px;
-  font-family: "SF Mono", "Monaco", monospace;
-  outline: none;
-}
-
-#terminal-input::placeholder {
-  color: rgba(0, 255, 0, 0.5);
 }
 
 /* Action buttons */

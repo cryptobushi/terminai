@@ -19,12 +19,17 @@
         "decorations": false,
         "transparent": true,
         "alwaysOnTop": false,
-        "resizable": true
+        "resizable": true,
+        "fullscreen": false,
+        "skipTaskbar": false,
+        "titleBarStyle": "Overlay",
+        "hiddenTitle": true
       }
     ],
     "security": {
       "csp": null
-    }
+    },
+    "macOSPrivateApi": true
   },
   "bundle": {
     "active": true,

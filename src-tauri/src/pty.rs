@@ -2,19 +2,26 @@
 /// Handles spawning, reading, and writing to pseudo-terminal sessions.
 
 use crate::errors::{Result, TerminaiError};
-use portable_pty::{CommandBuilder, NativePtySystem, PtySize, PtySystem};
+use portable_pty::{CommandBuilder, MasterPty, NativePtySystem, PtySize, PtySystem};
 use std::io::Read;
+use std::os::unix::io::AsRawFd;
 use std::sync::mpsc::{channel, Sender};
 use std::sync::{Arc, Mutex};
-use std::os::unix::io::AsRawFd;
 use tauri::{AppHandle, Emitter};
+
+/// Commands that can be sent to the PTY session
+enum PtyCommand {
+    Write(Vec<u8>),
+    Resize(u16, u16),
+}
 
 /// Represents a single PTY session
 pub struct PtySession {
     pub id: String,
-    write_tx: Sender<Vec<u8>>,
+    command_tx: Sender<PtyCommand>,
     reader_thread: Option<std::thread::JoinHandle<()>>,
     writer_thread: Option<std::thread::JoinHandle<()>>,
+    _master: Arc<Mutex<Box<dyn MasterPty + Send>>>,
 }
 
 impl PtySession {
@@ -25,7 +32,7 @@ impl PtySession {
         let pty_system = NativePtySystem::default();
 
         // Create PTY with initial size
-        let pair = pty_system
+        let mut pair = pty_system
             .openpty(PtySize {
                 rows: 24,
                 cols: 80,
@@ -43,8 +50,8 @@ impl PtySession {
             .spawn_command(cmd)
             .map_err(|e| TerminaiError::PtySpawnFailed(e.to_string()))?;
 
-        // Create channel for write requests
-        let (write_tx, write_rx) = channel::<Vec<u8>>();
+        // Create channel for write/resize commands
+        let (command_tx, command_rx) = channel::<PtyCommand>();
 
         // Spawn reader thread to emit output events
         let mut reader = pair
@@ -54,15 +61,18 @@ impl PtySession {
 
         let session_id = id.clone();
         let reader_thread = std::thread::spawn(move || {
+            log::info!("Reader thread started for session {}", session_id);
             let mut buf = [0u8; 8192];
             loop {
+                log::debug!("Reader thread waiting for data...");
                 match reader.read(&mut buf) {
                     Ok(0) => {
-                        log::info!("PTY session {} closed", session_id);
+                        log::info!("PTY session {} closed (EOF)", session_id);
                         break;
                     }
                     Ok(n) => {
                         let data = String::from_utf8_lossy(&buf[..n]).to_string();
+                        log::info!("PTY output: {} bytes: {:?}", n, &data[..n.min(50)]);
                         if let Err(e) = app_handle.emit(&format!("pty-output:{}", session_id), data) {
                             log::error!("Failed to emit pty output: {}", e);
                             break;
@@ -74,12 +84,17 @@ impl PtySession {
                     }
                 }
             }
+            log::info!("Reader thread exiting for session {}", session_id);
         });
 
-        // Get raw FD for writing
+        // Get raw FD for writing and resizing
         let fd = pair.master.as_raw_fd().expect("Failed to get PTY file descriptor");
 
-        // Spawn writer thread to handle write requests using raw FD
+        // Keep master alive in Arc for resize operations
+        let master = Arc::new(Mutex::new(pair.master));
+        let master_clone = master.clone();
+
+        // Spawn writer thread to handle write/resize commands using raw FD
         let session_id_writer = id.clone();
         let writer_thread = std::thread::spawn(move || {
             use std::os::unix::io::FromRawFd;
@@ -90,38 +105,63 @@ impl PtySession {
             // SAFETY: We own this FD and it's valid for the lifetime of the PTY
             let mut writer = unsafe { File::from_raw_fd(fd) };
 
-            while let Ok(data) = write_rx.recv() {
-                if let Err(e) = writer.write_all(&data) {
-                    log::error!("PTY write error in session {}: {}", session_id_writer, e);
-                    break;
-                }
-                if let Err(e) = writer.flush() {
-                    log::error!("PTY flush error in session {}: {}", session_id_writer, e);
-                    break;
+            while let Ok(cmd) = command_rx.recv() {
+                match cmd {
+                    PtyCommand::Write(data) => {
+                        if let Err(e) = writer.write_all(&data) {
+                            log::error!("PTY write error in session {}: {}", session_id_writer, e);
+                            break;
+                        }
+                        if let Err(e) = writer.flush() {
+                            log::error!("PTY flush error in session {}: {}", session_id_writer, e);
+                            break;
+                        }
+                    }
+                    PtyCommand::Resize(rows, cols) => {
+                        log::info!("Resizing PTY {} to {}x{}", session_id_writer, cols, rows);
+                        let master = master_clone.lock().unwrap();
+                        if let Err(e) = master.resize(PtySize {
+                            rows,
+                            cols,
+                            pixel_width: 0,
+                            pixel_height: 0,
+                        }) {
+                            log::error!("PTY resize error in session {}: {}", session_id_writer, e);
+                        }
+                    }
                 }
             }
 
-            //  Don't close the FD - it's owned by pair.master
+            // Don't close the FD - it's owned by pair.master
             std::mem::forget(writer);
             log::info!("Writer thread for session {} exiting", session_id_writer);
         });
 
-        // Keep pair alive so the PTY doesn't close
-        std::mem::forget(pair);
+        // Keep pair slave alive so the PTY doesn't close
+        std::mem::forget(pair.slave);
 
         Ok(Self {
             id,
-            write_tx,
+            command_tx,
             reader_thread: Some(reader_thread),
             writer_thread: Some(writer_thread),
+            _master: master,
         })
     }
 
     /// Write data to the PTY
     pub fn write(&self, data: &str) -> Result<()> {
-        self.write_tx
-            .send(data.as_bytes().to_vec())
+        self.command_tx
+            .send(PtyCommand::Write(data.as_bytes().to_vec()))
             .map_err(|e| TerminaiError::PtyWriteFailed(e.to_string()))?;
+        Ok(())
+    }
+
+    /// Resize the PTY
+    pub fn resize(&self, rows: u16, cols: u16) -> Result<()> {
+        self.command_tx
+            .send(PtyCommand::Resize(rows, cols))
+            .map_err(|e| TerminaiError::InternalError(format!("Resize failed: {}", e)))?;
         Ok(())
     }
 }
@@ -129,7 +169,7 @@ impl PtySession {
 impl Drop for PtySession {
     fn drop(&mut self) {
         log::info!("Dropping PTY session: {}", self.id);
-        // Dropping write_tx will cause the writer thread to exit
+        // Dropping command_tx will cause the writer thread to exit
         // Reader thread will exit when the PTY closes
     }
 }
@@ -165,11 +205,15 @@ impl PtyManager {
         session.write(data)
     }
 
-    /// Resize a PTY session (removed for now - requires different architecture)
-    pub fn resize_session(&self, _session_id: &str, _rows: u16, _cols: u16) -> Result<()> {
-        // TODO: Implement resize with a resize channel
-        log::warn!("PTY resize not yet implemented");
-        Ok(())
+    /// Resize a PTY session
+    pub fn resize_session(&self, session_id: &str, rows: u16, cols: u16) -> Result<()> {
+        let sessions = self.sessions.lock().unwrap();
+        let session = sessions
+            .get(session_id)
+            .ok_or_else(|| TerminaiError::SessionNotFound(session_id.to_string()))?;
+
+        let session = session.lock().unwrap();
+        session.resize(rows, cols)
     }
 
     /// Close a PTY session
