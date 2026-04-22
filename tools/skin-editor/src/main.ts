@@ -6,6 +6,7 @@ import type { EditorState, Region, SkinManifest, ResizeHandle } from "./types";
 import { StubHermesDataSource } from "@terminai/data/stub-hermes";
 import { regionRegistry, registerBuiltInRenderers } from "@terminai/regions";
 import type { DataSource } from "@terminai/data/types";
+import JSZip from "jszip";
 import "./style.css";
 
 class SkinEditor {
@@ -56,6 +57,10 @@ class SkinEditor {
     // Chrome image loader
     const loadChromeInput = document.getElementById("load-chrome") as HTMLInputElement;
     loadChromeInput.addEventListener("change", (e) => this.handleChromeLoad(e));
+
+    // WMZ loader
+    const loadWmzInput = document.getElementById("load-wmz") as HTMLInputElement;
+    loadWmzInput.addEventListener("change", (e) => this.handleWmzLoad(e));
 
     // Manifest loader
     const loadManifestInput = document.getElementById("load-manifest") as HTMLInputElement;
@@ -319,6 +324,447 @@ class SkinEditor {
     this.render();
 
     console.log(`[Editor] Loaded manifest with ${this.state.regions.length} regions`);
+  }
+
+  private async handleWmzLoad(e: Event): Promise<void> {
+    const input = e.target as HTMLInputElement;
+    const file = input.files?.[0];
+    if (!file) return;
+
+    console.log("[Editor] Loading WMZ file...");
+
+    try {
+      // Load and unzip the WMZ file
+      const arrayBuffer = await file.arrayBuffer();
+      const zip = await JSZip.loadAsync(arrayBuffer);
+
+      // Find the .wms XML file
+      const wmsFile = Object.keys(zip.files).find(name => name.endsWith('.wms'));
+      if (!wmsFile) {
+        alert("No .wms file found in WMZ archive");
+        return;
+      }
+
+      // Parse XML to get skin metadata
+      const xmlText = await zip.files[wmsFile].async('text');
+      console.log("[Editor] XML content preview:", xmlText.substring(0, 300));
+
+      const parser = new DOMParser();
+      // Parse as HTML for more lenient parsing (WMP XML is often not strictly well-formed)
+      const xmlDoc = parser.parseFromString(xmlText, 'text/html');
+
+      // Log the XML structure for debugging
+      console.log("[Editor] Parsed document");
+
+      // Get window dimensions from the view element
+      // WMP XML is case-insensitive, so we need to search case-insensitively
+      const allElements = xmlDoc.getElementsByTagName('*');
+      let viewElement: Element | null = null;
+
+      for (let i = 0; i < allElements.length; i++) {
+        const elem = allElements[i];
+        if (elem.tagName.toLowerCase() === 'view') {
+          viewElement = elem;
+          break;
+        }
+      }
+
+      if (!viewElement) {
+        const preview = xmlText.substring(0, 500);
+        alert(`No VIEW element found in skin XML.\n\nRoot element: ${xmlDoc.documentElement.tagName}\n\nXML preview:\n${preview}`);
+        console.error("[Editor] Full XML:", xmlText);
+        return;
+      }
+
+      const width = parseInt(viewElement.getAttribute('width') || '0');
+      const height = parseInt(viewElement.getAttribute('height') || '0');
+
+      console.log(`[Editor] Skin dimensions: ${width}x${height}`);
+
+      // Parse SUBVIEW elements to get bitmap positions (case-insensitive)
+      const subviews: Element[] = [];
+      for (let i = 0; i < allElements.length; i++) {
+        const elem = allElements[i];
+        if (elem.tagName.toLowerCase() === 'subview' && elem.hasAttribute('image')) {
+          subviews.push(elem);
+        }
+      }
+      console.log(`[Editor] Found ${subviews.length} subview elements with images`);
+      console.log(`[Editor] Total elements in document: ${allElements.length}`);
+
+      // If we found no subviews, try parsing from raw text instead
+      // (HTML parser may have dropped custom XML elements)
+      if (subviews.length === 0) {
+        console.log("[Editor] No subviews found via DOM, trying tree-based XML parsing...");
+
+        // Parse the entire XML tree to find nested subviews and calculate absolute positions
+        const subviewData = this.parseSubviewTree(xmlText);
+
+        console.log(`[Editor] Found ${subviewData.length} unique subviews via tree parsing`);
+
+        // Process subviews from regex data
+        const bitmapRegions: Region[] = [];
+        let zIndex = 1;
+
+        for (const data of subviewData) {
+          const filename = data.imagePath.split('/').pop();
+          if (!filename) continue;
+
+          console.log(`[Editor] Processing ${filename} at (${data.x}, ${data.y})`);
+
+          const bitmapFile = zip.files[filename];
+          if (!bitmapFile) {
+            console.warn(`[Editor] Bitmap file not found: ${filename}`);
+            continue;
+          }
+
+          const bitmapBlob = await bitmapFile.async('blob');
+          const imageUrl = await this.processBitmap(bitmapBlob);
+          const img = await this.loadImage(imageUrl);
+
+          // Create unique ID - if there's already a region with this filename, append coordinates
+          let regionId = filename.replace('.bmp', '');
+          const existingWithSameId = bitmapRegions.find(r => r.id === regionId);
+          if (existingWithSameId) {
+            regionId = `${regionId}_${data.x}_${data.y}`;
+          }
+
+          const region: Region = {
+            id: regionId,
+            type: 'image',
+            rect: {
+              x: data.x,
+              y: data.y,
+              width: img.width,
+              height: img.height,
+            },
+            zIndex,
+            data: {
+              imageUrl,
+            },
+          };
+
+          console.log(`[Editor] Created region ${region.id}: x=${region.rect.x}, y=${region.rect.y}, w=${region.rect.width}, h=${region.rect.height}, z=${zIndex}`);
+
+          bitmapRegions.push(region);
+          zIndex++;
+        }
+
+        console.log(`[Editor] Created ${bitmapRegions.length} bitmap regions from regex parsing`);
+
+        // Create a transparent chrome placeholder (don't composite - layers are individual regions)
+        const chromeCanvas = document.createElement('canvas');
+        chromeCanvas.width = width;
+        chromeCanvas.height = height;
+        // Leave it transparent - the bitmap layers will be visible individually
+
+        const chromeBlob = await new Promise<Blob>((resolve) => {
+          chromeCanvas.toBlob((blob) => resolve(blob!), 'image/png');
+        });
+        const chromeUrl = URL.createObjectURL(chromeBlob);
+
+        const chromeImg = new Image();
+        chromeImg.onload = () => {
+          this.state.chromeImage = chromeImg;
+          this.chromeImg.src = chromeImg.src;
+          this.chromeImg.style.display = "block";
+
+          this.canvas.width = chromeImg.width;
+          this.canvas.height = chromeImg.height;
+
+          this.canvasStage.style.width = `${chromeImg.width}px`;
+          this.canvasStage.style.height = `${chromeImg.height}px`;
+
+          // Clear any existing region DOMs before setting new regions
+          this.canvasStage.querySelectorAll('.region-layer').forEach(el => el.remove());
+          this.regionCleanups.forEach(cleanup => cleanup());
+          this.regionCleanups = [];
+
+          this.state.regions = bitmapRegions;
+          this.saveHistory();
+          this.renderRegionList();
+          this.render();
+
+          const instructions = document.getElementById("canvas-instructions");
+          if (instructions) instructions.style.display = "none";
+
+          document.getElementById("export-manifest")?.removeAttribute("disabled");
+          document.getElementById("toggle-preview")?.removeAttribute("disabled");
+          document.getElementById("toggle-snap")?.removeAttribute("disabled");
+
+          console.log(`[Editor] WMZ loaded: ${chromeImg.width}x${chromeImg.height} with ${this.state.regions.length} bitmap layers`);
+        };
+
+        chromeImg.src = chromeUrl;
+        return;
+      }
+
+      // Extract bitmaps and create regions
+      const bitmapRegions: Region[] = [];
+      let zIndex = 1; // Start with z-index 1 (under chrome at z-index 10)
+
+      for (const subview of Array.from(subviews)) {
+        const imagePath = subview.getAttribute('image');
+        const x = parseInt(subview.getAttribute('x') || '0');
+        const y = parseInt(subview.getAttribute('y') || '0');
+
+        if (!imagePath) continue;
+
+        // Extract bitmap filename from path (e.g., "head.bmp" from "../head.bmp")
+        const filename = imagePath.split('/').pop();
+        if (!filename) continue;
+
+        console.log(`[Editor] Processing ${filename} at (${x}, ${y})`);
+
+        // Get bitmap file from ZIP
+        const bitmapFile = zip.files[filename];
+        if (!bitmapFile) {
+          console.warn(`[Editor] Bitmap file not found: ${filename}`);
+          continue;
+        }
+
+        // Load bitmap and convert to image with transparent magenta
+        const bitmapBlob = await bitmapFile.async('blob');
+        const imageUrl = await this.processBitmap(bitmapBlob);
+
+        // Get bitmap dimensions by loading the image
+        const img = await this.loadImage(imageUrl);
+
+        // Create region for this bitmap layer
+        const region: Region = {
+          id: filename.replace('.bmp', ''),
+          type: 'image',
+          rect: {
+            x,
+            y,
+            width: img.width,
+            height: img.height,
+          },
+          zIndex,
+          data: {
+            imageUrl,
+          },
+        };
+
+        bitmapRegions.push(region);
+        zIndex++;
+      }
+
+      console.log(`[Editor] Created ${bitmapRegions.length} bitmap regions`);
+
+      // Create composite chrome.png by rendering all bitmaps
+      const chromeCanvas = document.createElement('canvas');
+      chromeCanvas.width = width;
+      chromeCanvas.height = height;
+      const ctx = chromeCanvas.getContext('2d')!;
+
+      // Composite all bitmap layers in z-index order
+      for (const region of bitmapRegions) {
+        if (region.data?.imageUrl) {
+          const img = await this.loadImage(region.data.imageUrl);
+          ctx.drawImage(img, region.rect.x, region.rect.y);
+        }
+      }
+
+      // Convert canvas to blob and create object URL
+      const chromeBlob = await new Promise<Blob>((resolve) => {
+        chromeCanvas.toBlob((blob) => resolve(blob!), 'image/png');
+      });
+      const chromeUrl = URL.createObjectURL(chromeBlob);
+
+      // Load the chrome image
+      const chromeImg = new Image();
+      chromeImg.onload = () => {
+        this.state.chromeImage = chromeImg;
+        this.chromeImg.src = chromeImg.src;
+        this.chromeImg.style.display = "block";
+
+        // Size canvas to match
+        this.canvas.width = chromeImg.width;
+        this.canvas.height = chromeImg.height;
+
+        // Size canvas-stage
+        this.canvasStage.style.width = `${chromeImg.width}px`;
+        this.canvasStage.style.height = `${chromeImg.height}px`;
+
+        // Clear any existing region DOMs before setting new regions
+        this.canvasStage.querySelectorAll('.region-layer').forEach(el => el.remove());
+        this.regionCleanups.forEach(cleanup => cleanup());
+        this.regionCleanups = [];
+
+        // Set regions
+        this.state.regions = bitmapRegions;
+        this.saveHistory();
+        this.renderRegionList();
+        this.render();
+
+        // Hide instructions
+        const instructions = document.getElementById("canvas-instructions");
+        if (instructions) instructions.style.display = "none";
+
+        // Enable buttons
+        document.getElementById("export-manifest")?.removeAttribute("disabled");
+        document.getElementById("toggle-preview")?.removeAttribute("disabled");
+        document.getElementById("toggle-snap")?.removeAttribute("disabled");
+
+        console.log(`[Editor] WMZ loaded: ${chromeImg.width}x${chromeImg.height} with ${this.state.regions.length} bitmap layers`);
+      };
+
+      chromeImg.src = chromeUrl;
+
+    } catch (error) {
+      console.error("[Editor] Failed to load WMZ:", error);
+      alert(`Failed to load WMZ file: ${error}`);
+    }
+  }
+
+  private parseSubviewTree(xmlText: string): Array<{imagePath: string, x: number, y: number}> {
+    const subviewData: Array<{imagePath: string, x: number, y: number}> = [];
+    const seen = new Set<string>();
+
+    // Recursive function to parse subviews and calculate absolute positions
+    const parseSubview = (xml: string, parentX: number = 0, parentY: number = 0, depth: number = 0): number => {
+      let pos = 0;
+
+      while (pos < xml.length) {
+        // Find next <subview opening tag
+        const subviewStart = xml.indexOf('<subview', pos);
+        if (subviewStart === -1) break;
+
+        // Find the end of the opening tag
+        const tagEnd = xml.indexOf('>', subviewStart);
+        if (tagEnd === -1) break;
+
+        // Extract the opening tag and attributes
+        const openingTag = xml.substring(subviewStart, tagEnd + 1);
+        const attributes = openingTag.match(/<subview\s+([^>]+)>/is)?.[1] || '';
+
+        // Extract position (can be x/y or left/top)
+        let xMatch = attributes.match(/\bx\s*=\s*"(\d+)"/i);
+        if (!xMatch) xMatch = attributes.match(/\bleft\s*=\s*"(\d+)"/i);
+
+        let yMatch = attributes.match(/\by\s*=\s*"(\d+)"/i);
+        if (!yMatch) yMatch = attributes.match(/\btop\s*=\s*"(\d+)"/i);
+
+        const relativeX = xMatch ? parseInt(xMatch[1]) : 0;
+        const relativeY = yMatch ? parseInt(yMatch[1]) : 0;
+
+        // Calculate absolute position
+        const absoluteX = parentX + relativeX;
+        const absoluteY = parentY + relativeY;
+
+        // Extract image attribute (can be 'image' or 'backgroundImage')
+        let imageMatch = attributes.match(/\bimage\s*=\s*"([^"]+)"/i);
+        if (!imageMatch) {
+          imageMatch = attributes.match(/\bbackgroundImage\s*=\s*"([^"]+)"/i);
+        }
+
+        // If this subview has an image, add it to the list
+        if (imageMatch) {
+          const imagePath = imageMatch[1];
+          const key = `${imagePath}:${absoluteX}:${absoluteY}`;
+
+          if (!seen.has(key)) {
+            seen.add(key);
+            subviewData.push({ imagePath, x: absoluteX, y: absoluteY });
+            console.log(`[Editor] Found subview ${imagePath} at absolute position (${absoluteX}, ${absoluteY}) [depth ${depth}]`);
+          }
+        }
+
+        // Find the matching closing tag
+        let closeTagPos = tagEnd + 1;
+        let openCount = 1;
+
+        while (closeTagPos < xml.length && openCount > 0) {
+          const nextOpen = xml.indexOf('<subview', closeTagPos);
+          const nextClose = xml.indexOf('</subview>', closeTagPos);
+
+          if (nextClose === -1) break;
+
+          if (nextOpen !== -1 && nextOpen < nextClose) {
+            openCount++;
+            closeTagPos = nextOpen + 1;
+          } else {
+            openCount--;
+            if (openCount === 0) {
+              // Found the matching close tag
+              const content = xml.substring(tagEnd + 1, nextClose);
+
+              // Recursively parse the content for nested subviews
+              parseSubview(content, absoluteX, absoluteY, depth + 1);
+
+              pos = nextClose + 10; // Skip past </subview>
+              break;
+            }
+            closeTagPos = nextClose + 10;
+          }
+        }
+
+        if (openCount > 0) {
+          // No matching close tag found, skip to next
+          pos = tagEnd + 1;
+        }
+      }
+
+      return pos;
+    };
+
+    // Parse from the root
+    parseSubview(xmlText, 0, 0, 0);
+
+    return subviewData;
+  }
+
+  private async processBitmap(bitmapBlob: Blob): Promise<string> {
+    // Load BMP into an image element
+    const bmpUrl = URL.createObjectURL(bitmapBlob);
+    const img = await this.loadImage(bmpUrl);
+
+    // Create canvas to process the image
+    const canvas = document.createElement('canvas');
+    canvas.width = img.width;
+    canvas.height = img.height;
+    const ctx = canvas.getContext('2d')!;
+
+    // Draw image to canvas
+    ctx.drawImage(img, 0, 0);
+
+    // Get image data
+    const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    const data = imageData.data;
+
+    // Make magenta (#FF00FF) pixels transparent
+    for (let i = 0; i < data.length; i += 4) {
+      const r = data[i];
+      const g = data[i + 1];
+      const b = data[i + 2];
+
+      if (r === 255 && g === 0 && b === 255) {
+        data[i + 3] = 0; // Set alpha to 0 (transparent)
+      }
+    }
+
+    // Put the modified image data back
+    ctx.putImageData(imageData, 0, 0);
+
+    // Convert to blob and create object URL
+    const processedBlob = await new Promise<Blob>((resolve) => {
+      canvas.toBlob((blob) => resolve(blob!), 'image/png');
+    });
+
+    // Clean up original blob URL
+    URL.revokeObjectURL(bmpUrl);
+
+    return URL.createObjectURL(processedBlob);
+  }
+
+  private loadImage(src: string): Promise<HTMLImageElement> {
+    return new Promise((resolve, reject) => {
+      const img = new Image();
+      img.onload = () => resolve(img);
+      img.onerror = reject;
+      img.src = src;
+    });
   }
 
   private handleCanvasMouseDown(e: MouseEvent): void {
@@ -697,44 +1143,66 @@ class SkinEditor {
   }
 
   private renderRegionDOMs(): void {
-    // Clean up existing region renderers
-    this.regionCleanups.forEach(cleanup => cleanup());
-    this.regionCleanups = [];
+    // Count how many .region-layer elements exist
+    const existingCount = this.canvasStage.querySelectorAll('.region-layer').length;
 
-    // Remove all region elements from canvas-stage (keep chrome and canvas)
-    const children = Array.from(this.canvasStage.children);
-    children.forEach(child => {
-      if (child !== this.chromeImg && child !== this.canvas) {
-        child.remove();
-      }
-    });
-
-    // Mount all regions using runtime renderer registry
+    // Update positions of existing region DOMs instead of recreating them
     this.state.regions.forEach((region) => {
-      const renderer = regionRegistry.get(region.type);
-      if (!renderer || !this.dataSource) {
-        console.warn(`[Editor] No renderer found for region type: ${region.type}`);
-        return;
+      const container = this.canvasStage.querySelector(`[data-region-id="${region.id}"]`) as HTMLElement;
+
+      if (container) {
+        // Update existing container position/size
+        container.style.left = `${region.rect.x}px`;
+        container.style.top = `${region.rect.y}px`;
+        container.style.width = `${region.rect.width}px`;
+        container.style.height = `${region.rect.height}px`;
+        container.style.zIndex = (region.zIndex !== undefined ? region.zIndex : 5).toString();
+      } else {
+        // Create new region DOM
+        console.log(`[Editor] Creating new DOM for region: ${region.id}`);
+        const renderer = regionRegistry.get(region.type);
+        if (!renderer || !this.dataSource) {
+          console.warn(`[Editor] No renderer found for region type: ${region.id}`);
+          return;
+        }
+
+        const newContainer = document.createElement("div");
+        newContainer.className = "region-layer";
+        newContainer.dataset.regionId = region.id;
+        newContainer.style.position = "absolute";
+        newContainer.style.left = `${region.rect.x}px`;
+        newContainer.style.top = `${region.rect.y}px`;
+        newContainer.style.width = `${region.rect.width}px`;
+        newContainer.style.height = `${region.rect.height}px`;
+        newContainer.style.overflow = "hidden";
+        newContainer.style.boxSizing = "border-box";
+        newContainer.style.pointerEvents = "auto";
+        newContainer.style.zIndex = (region.zIndex !== undefined ? region.zIndex : 5).toString();
+
+        const cleanup = renderer.mount(newContainer, region, this.dataSource);
+        this.regionCleanups.push(cleanup);
+
+        this.canvasStage.appendChild(newContainer);
       }
-
-      const container = document.createElement("div");
-      container.className = "region-layer";
-      container.dataset.regionId = region.id;
-      container.style.position = "absolute";
-      container.style.left = `${region.rect.x}px`;
-      container.style.top = `${region.rect.y}px`;
-      container.style.width = `${region.rect.width}px`;
-      container.style.height = `${region.rect.height}px`;
-      container.style.overflow = "hidden";
-      container.style.boxSizing = "border-box";
-      container.style.pointerEvents = "auto";
-      container.style.zIndex = (region.zIndex !== undefined ? region.zIndex : 5).toString();
-
-      const cleanup = renderer.mount(container, region, this.dataSource);
-      this.regionCleanups.push(cleanup);
-
-      this.canvasStage.appendChild(container);
     });
+
+    // Remove any region DOMs that no longer exist in state
+    const allRegionContainers = this.canvasStage.querySelectorAll('.region-layer');
+    allRegionContainers.forEach(container => {
+      const regionId = (container as HTMLElement).dataset.regionId;
+      const exists = this.state.regions.some(r => r.id === regionId);
+      if (!exists) {
+        console.log(`[Editor] Removing orphaned DOM for region: ${regionId}`);
+        container.remove();
+      }
+    });
+
+    const finalCount = this.canvasStage.querySelectorAll('.region-layer').length;
+    if (finalCount !== this.state.regions.length) {
+      console.warn(`[Editor] DOM count mismatch! Expected ${this.state.regions.length}, got ${finalCount}`);
+      console.warn(`[Editor] Region IDs in state:`, this.state.regions.map(r => r.id));
+      console.warn(`[Editor] Region IDs in DOM:`, Array.from(this.canvasStage.querySelectorAll('.region-layer')).map(el => (el as HTMLElement).dataset.regionId));
+    }
   }
 
   private drawResizeHandles(region: Region): void {

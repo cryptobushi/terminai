@@ -8,12 +8,19 @@
     "build": "vite build",
     "preview": "vite preview"
   },
-  "keywords": ["terminai", "wmp", "skin-editor"],
+  "keywords": [
+    "terminai",
+    "wmp",
+    "skin-editor"
+  ],
   "author": "",
   "license": "MIT",
   "devDependencies": {
     "@types/node": "^22.10.5",
     "typescript": "^5.7.3",
     "vite": "^6.4.2"
+  },
+  "dependencies": {
+    "jszip": "^3.10.1"
   }
 }
