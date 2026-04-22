@@ -9,13 +9,17 @@
 }
 
 html {
-  background: rgba(0, 0, 0, 0);
+  background: transparent;
+  width: 100%;
+  height: 100%;
 }
 
 body {
   margin: 0;
   padding: 0;
   overflow: hidden;
+  width: 100%;
+  height: 100%;
   /* Transparent background for frameless window */
   background: transparent;
   font-family: "SF Mono", "Monaco", "Inconsolata", "Fira Code", "Droid Sans Mono",
@@ -31,11 +35,18 @@ body {
 
 /* Terminal container - xterm.js will fill this */
 #terminal-container {
-  background: #000000; /* Fully opaque black */
+  background: #000000 !important; /* Fully opaque black */
+  opacity: 1 !important;
   border: 1px solid rgba(255, 255, 255, 0.1);
   border-radius: 4px;
   overflow: hidden;
   -webkit-app-region: no-drag;
+}
+
+/* Ensure xterm terminal is opaque */
+#terminal-container .xterm {
+  background-color: #000000 !important;
+  opacity: 1 !important;
 }
 
 /* Action buttons */

@@ -49,26 +49,24 @@ class TerminaiApp {
   private renderSkin(): void {
     const app = document.getElementById("app") as HTMLElement;
 
-    // Apply skin dimensions
-    app.style.width = `${this.skin.visual.width}px`;
-    app.style.height = `${this.skin.visual.height}px`;
+    // Make app fill the entire window
+    app.style.width = "100vw";
+    app.style.height = "100vh";
 
-    // For now, use rounded corners instead of clip-path for better transparency
-    // TODO: Implement true shaped windows via Tauri APIs
-    app.style.borderRadius = "40px";
+    // Apply skin shape and background
+    app.style.clipPath = this.skin.visual.shape;
     app.style.background = this.skin.visual.background;
-
-    // Add shadow for better visibility
-    app.style.boxShadow = "0 10px 40px rgba(0, 0, 0, 0.3)";
 
     // Create terminal viewport region
     const terminalContainer = document.createElement("div");
     terminalContainer.id = "terminal-container";
     terminalContainer.style.position = "absolute";
-    terminalContainer.style.left = `${this.skin.terminalRegion.x}px`;
-    terminalContainer.style.top = `${this.skin.terminalRegion.y}px`;
-    terminalContainer.style.width = `${this.skin.terminalRegion.width}px`;
-    terminalContainer.style.height = `${this.skin.terminalRegion.height}px`;
+
+    // Use percentages for responsive layout
+    terminalContainer.style.left = `${(this.skin.terminalRegion.x / this.skin.visual.width) * 100}%`;
+    terminalContainer.style.top = `${(this.skin.terminalRegion.y / this.skin.visual.height) * 100}%`;
+    terminalContainer.style.width = `${(this.skin.terminalRegion.width / this.skin.visual.width) * 100}%`;
+    terminalContainer.style.height = `${(this.skin.terminalRegion.height / this.skin.visual.height) * 100}%`;
 
     // Render action buttons (placeholder for now)
     this.skin.actions.forEach((action) => {
@@ -76,8 +74,8 @@ class TerminaiApp {
       button.className = "action-button";
       button.textContent = action.label;
       button.style.position = "absolute";
-      button.style.left = `${action.position.x}px`;
-      button.style.top = `${action.position.y}px`;
+      button.style.left = `${(action.position.x / this.skin.visual.width) * 100}%`;
+      button.style.top = `${(action.position.y / this.skin.visual.height) * 100}%`;
       button.onclick = () => this.handleAction(action.id);
       app.appendChild(button);
     });
