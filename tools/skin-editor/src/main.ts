@@ -724,22 +724,79 @@ class SkinEditor {
   }
 
   private enterPreviewMode(): void {
-    // Hide canvas (edit mode)
+    // Hide canvas and other UI elements
     this.canvas.style.display = "none";
 
-    // Create preview container
-    const canvasWrapper = document.getElementById("canvas-wrapper")!;
+    // Hide canvas info bar
+    const canvasInfo = document.querySelector(".canvas-info") as HTMLElement;
+    if (canvasInfo) canvasInfo.style.display = "none";
+
+    // Create fullscreen preview overlay
+    const previewOverlay = document.createElement("div");
+    previewOverlay.id = "preview-overlay";
+    previewOverlay.style.cssText = `
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100vw;
+      height: 100vh;
+      background: #000000;
+      z-index: 9999;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    `;
+
+    // Create app container (mimics terminai window)
     this.previewContainer = document.createElement("div");
     this.previewContainer.id = "preview-container";
+    this.previewContainer.className = "terminai-preview";
     this.previewContainer.style.cssText = `
       position: relative;
       width: ${this.state.chromeImage?.width}px;
       height: ${this.state.chromeImage?.height}px;
-      background-image: url(${this.canvas.toDataURL()});
-      background-size: contain;
-      background-repeat: no-repeat;
+      box-shadow: 0 10px 40px rgba(0, 0, 0, 0.8);
     `;
-    canvasWrapper.appendChild(this.previewContainer);
+
+    // Add chrome image as background
+    const chromeImg = document.createElement("img");
+    chromeImg.style.cssText = `
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      pointer-events: none;
+      user-select: none;
+      z-index: 0;
+    `;
+    chromeImg.src = this.canvas.toDataURL();
+    this.previewContainer.appendChild(chromeImg);
+
+    // Add CRT scanline overlay
+    const scanlineOverlay = document.createElement("div");
+    scanlineOverlay.style.cssText = `
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      pointer-events: none;
+      z-index: 100;
+      background: repeating-linear-gradient(
+        0deg,
+        rgba(0, 0, 0, 0.03) 0px,
+        rgba(0, 0, 0, 0.03) 1px,
+        transparent 1px,
+        transparent 2px
+      );
+      animation: scanline 8s linear infinite;
+      opacity: 0.4;
+    `;
+    this.previewContainer.appendChild(scanlineOverlay);
+
+    previewOverlay.appendChild(this.previewContainer);
+    document.body.appendChild(previewOverlay);
 
     // Initialize data source
     this.previewDataSource = new StubHermesDataSource();
@@ -779,14 +836,19 @@ class SkinEditor {
       this.previewDataSource = null;
     }
 
-    // Remove preview container
-    if (this.previewContainer) {
-      this.previewContainer.remove();
-      this.previewContainer = null;
+    // Remove preview overlay
+    const previewOverlay = document.getElementById("preview-overlay");
+    if (previewOverlay) {
+      previewOverlay.remove();
     }
 
-    // Show canvas again
+    this.previewContainer = null;
+
+    // Show canvas and UI again
     this.canvas.style.display = "block";
+
+    const canvasInfo = document.querySelector(".canvas-info") as HTMLElement;
+    if (canvasInfo) canvasInfo.style.display = "flex";
 
     console.log("[Editor] Preview mode: exited");
   }

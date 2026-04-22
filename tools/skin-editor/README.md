@@ -38,11 +38,12 @@ Open `http://localhost:3000` (or the port shown in terminal).
    - `memory-context` - Recent memory fragments
    - `activity-feed` - Live event stream
    - `decorative` - No content, visual only
-5. **Preview**: Click "Preview Mode" to see live rendering with stub data
-   - Activity feed ticks with new events every 3-8 seconds
-   - Agent status shows updating token counts
-   - Memory fragments display with timestamps
-   - Press Escape or click "Exit Preview" to return to edit mode
+5. **Preview**: Click "Preview Mode" for fullscreen Terminai app mock
+   - **Fullscreen black background** - see skin in isolation
+   - **CRT scanline effects** - authentic retro aesthetic
+   - **Live agent data** - activity feed, token counts, memory fragments
+   - **Realistic timing** - events every 3-8 seconds, just like real usage
+   - **Exit**: Press `Escape` or click "Exit Preview" button
 6. **Export**: Click "Export Manifest" to download `manifest.json`
 7. **Deploy**: Copy chrome.png + manifest.json to `/public/skins/your-skin-name/`
 
@@ -77,6 +78,7 @@ Open `http://localhost:3000` (or the port shown in terminal).
 - **Undo Often**: Don't worry about mistakes - Cmd/Ctrl+Z has your back
 - **Import Existing**: Load an existing manifest to tweak coordinates visually
 - **Visual Feedback**: Selected regions show green overlay + resize handles
+- **Preview Early, Preview Often**: Toggle preview to see how regions look with real content before exporting
 
 ## Output Format
 

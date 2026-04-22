@@ -280,6 +280,49 @@ body {
   flex: 1;
 }
 
+/* Preview mode styles */
+#preview-overlay {
+  animation: fadeIn 0.3s ease-out;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes scanline {
+  0% {
+    transform: translateY(0);
+  }
+  100% {
+    transform: translateY(100%);
+  }
+}
+
+.terminai-preview {
+  background: transparent;
+}
+
+/* Exit preview hint */
+#preview-overlay::before {
+  content: 'Press ESC to exit preview';
+  position: fixed;
+  top: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 8px 16px;
+  background: rgba(0, 0, 0, 0.8);
+  color: #ffffff;
+  font-size: 12px;
+  border-radius: 4px;
+  z-index: 10000;
+  animation: fadeIn 0.5s ease-out;
+}
+
 /* Scrollbar styling */
 ::-webkit-scrollbar {
   width: 8px;
