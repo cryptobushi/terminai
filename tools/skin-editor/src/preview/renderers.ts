@@ -3,7 +3,7 @@
  */
 
 import type { Region } from "../types";
-import type { DataSource, ActivityEvent } from "./data-types";
+import type { DataSource, ActivityEvent } from "@terminai/data/types";
 
 export interface PreviewRenderer {
   mount(element: HTMLElement, region: Region, dataSource: DataSource): () => void;

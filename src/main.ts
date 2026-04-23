@@ -1,17 +1,25 @@
-/**
- * Terminai - Main application entry point
- *
- * Day 5: Multi-region rendering with plugin-style dispatch
- */
-
 import { headspaceSkin } from "./skins/headspace";
 import type { SkinManifest } from "./types";
 import { registerBuiltInRenderers, regionRegistry } from "./regions";
 import { StubHermesDataSource } from "./data/stub-hermes";
 import type { DataSource } from "./data/types";
 import { SkinBundleLoader } from "./skins/bundle-loader";
-import { getTerminalSession } from "./regions/terminal";
 import "./style.css";
+
+/**
+ * Resize information attached to content wrapper element
+ */
+interface ResizeInfo {
+  isNearEdge: (e: MouseEvent) => boolean;
+  startResize: (e: MouseEvent) => void;
+}
+
+/**
+ * HTMLElement extended with resize metadata
+ */
+interface HTMLElementWithResize extends HTMLElement {
+  __resizeInfo?: ResizeInfo;
+}
 
 class TerminaiApp {
   private skin: SkinManifest;
@@ -24,24 +32,14 @@ class TerminaiApp {
     this.dataSource = new StubHermesDataSource();
   }
 
-  /**
-   * Initialize and render the application
-   */
   async init(): Promise<void> {
     console.log("[Terminai] Initializing with skin:", this.skin.name);
 
-    // Register built-in region renderers
     registerBuiltInRenderers();
-
-    // Render the skin (this will mount all regions including terminal)
     this.renderSkin();
-
     console.log("[Terminai] Ready");
   }
 
-  /**
-   * Render the skin visually
-   */
   private renderSkin(): void {
     const app = document.getElementById("app") as HTMLElement;
 
@@ -49,7 +47,6 @@ class TerminaiApp {
     console.log("[Terminai] Skin dimensions:", this.skin.visual.width, "x", this.skin.visual.height);
     console.log("[Terminai] Regions to render:", this.skin.regions.length);
 
-    // Make app fill entire window
     app.style.width = "100vw";
     app.style.height = "100vh";
     app.style.position = "relative";
@@ -57,28 +54,21 @@ class TerminaiApp {
 
     console.log("[Terminai] App container size:", app.offsetWidth, "x", app.offsetHeight);
 
-    // Create a content wrapper to hold the skin - will scale to fill window while maintaining aspect ratio
     const contentWrapper = document.createElement("div");
     contentWrapper.id = "content-wrapper";
     contentWrapper.style.position = "absolute";
 
-    // Store the skin's native aspect ratio
     const aspectRatio = this.skin.visual.width / this.skin.visual.height;
-
-    // Calculate scale to fit window while maintaining aspect ratio
     const windowWidth = window.innerWidth;
     const windowHeight = window.innerHeight;
     const windowAspect = windowWidth / windowHeight;
 
     if (windowAspect > aspectRatio) {
-      // Window is wider than skin - fit to height
       this.currentScale = windowHeight / this.skin.visual.height;
     } else {
-      // Window is taller than skin - fit to width
       this.currentScale = windowWidth / this.skin.visual.width;
     }
 
-    // Set content wrapper to native skin size and scale it
     contentWrapper.style.width = `${this.skin.visual.width}px`;
     contentWrapper.style.height = `${this.skin.visual.height}px`;
     contentWrapper.style.transform = `scale(${this.currentScale})`;
@@ -88,7 +78,6 @@ class TerminaiApp {
 
     console.log(`[Terminai] Window: ${windowWidth}x${windowHeight}, Scale: ${this.currentScale}`);
 
-    // If we have a chrome image (real WMP skin), render it
     if (this.skin.visual.chromeImage) {
       const chromeImg = document.createElement("img");
       chromeImg.id = "chrome-image";
@@ -102,10 +91,8 @@ class TerminaiApp {
       chromeImg.style.maxHeight = "none";
       chromeImg.style.pointerEvents = "none";
       chromeImg.style.userSelect = "none";
-      // Chrome is typically the base layer, default to 0 if not specified
       chromeImg.style.zIndex = (this.skin.visual.chromeZIndex ?? 0).toString();
 
-      // Debug: Log when image loads or fails
       chromeImg.onload = () => {
         console.log("[Terminai] Chrome image loaded successfully:", this.skin.visual.chromeImage);
       };
@@ -114,19 +101,10 @@ class TerminaiApp {
       };
 
       contentWrapper.appendChild(chromeImg);
-    } else {
-      // Fallback for old placeholder skin
-      if (this.skin.visual.shape) {
-        contentWrapper.style.clipPath = this.skin.visual.shape;
-      }
-      if (this.skin.visual.background) {
-        contentWrapper.style.background = this.skin.visual.background;
-      }
     }
 
     app.appendChild(contentWrapper);
 
-    // Render all regions using the registry
     const regionElements: Record<string, HTMLElement> = {};
 
     this.skin.regions.forEach((region) => {
@@ -136,14 +114,12 @@ class TerminaiApp {
         return;
       }
 
-      // Create container for this region
       const container = document.createElement("div");
       container.id = `region-${region.id}`;
       container.style.position = "absolute";
 
       if (region.type === "terminal") {
-        // Terminal gets rendered OUTSIDE the scaled wrapper for crisp text
-        // Position it at scaled coordinates on the app element
+        // Terminal rendered outside scaled wrapper for crisp text at 1:1 pixel ratio
         container.style.left = `${region.rect.x * this.currentScale}px`;
         container.style.top = `${region.rect.y * this.currentScale}px`;
         container.style.width = `${region.rect.width * this.currentScale}px`;
@@ -152,15 +128,12 @@ class TerminaiApp {
           container.style.zIndex = region.zIndex.toString();
         }
 
-        // Mount the renderer with scale = 1.0 since no CSS transform
         const cleanup = renderer.mount(container, region, this.dataSource, 1.0);
         this.regionCleanups.push(cleanup);
 
-        // Append to app, not contentWrapper
         app.appendChild(container);
         regionElements[region.id] = container;
       } else {
-        // Other regions inside the scaled wrapper
         container.style.left = `${region.rect.x}px`;
         container.style.top = `${region.rect.y}px`;
         container.style.width = `${region.rect.width}px`;
@@ -169,7 +142,6 @@ class TerminaiApp {
           container.style.zIndex = region.zIndex.toString();
         }
 
-        // Mount the renderer
         const cleanup = renderer.mount(container, region, this.dataSource, this.currentScale);
         this.regionCleanups.push(cleanup);
 
@@ -178,19 +150,16 @@ class TerminaiApp {
       }
     });
 
-    // Wire up speaker pulse animation
-    // When activity-feed emits 'activity' event, pulse the speaker regions
+    // Pulse speaker regions when activity-feed emits events
     const activityRegion = regionElements["right-activity"];
     const leftSpeaker = regionElements["left-memory"];
     const rightSpeaker = regionElements["right-activity"];
 
     if (activityRegion && leftSpeaker && rightSpeaker) {
       activityRegion.addEventListener("activity", () => {
-        // Add pulse class
         leftSpeaker.classList.add("pulse");
         rightSpeaker.classList.add("pulse");
 
-        // Remove after animation completes (800ms)
         setTimeout(() => {
           leftSpeaker.classList.remove("pulse");
           rightSpeaker.classList.remove("pulse");
@@ -198,19 +167,11 @@ class TerminaiApp {
       });
     }
 
-    // Set up window dragging on the entire app (background area)
     this.setupWindowDragging(app);
-
-    // Set up resize listener to rescale skin when window size changes
     this.setupWindowResize(contentWrapper);
-
-    // Set up proportional resize handles on the skin edges
     this.setupProportionalResize(contentWrapper);
   }
 
-  /**
-   * Set up resize listener to scale skin content when window is resized
-   */
   private setupWindowResize(contentWrapper: HTMLElement): void {
     const resizeHandler = () => {
       const aspectRatio = this.skin.visual.width / this.skin.visual.height;
@@ -219,19 +180,15 @@ class TerminaiApp {
       const windowAspect = windowWidth / windowHeight;
 
       if (windowAspect > aspectRatio) {
-        // Window is wider than skin - fit to height
         this.currentScale = windowHeight / this.skin.visual.height;
       } else {
-        // Window is taller than skin - fit to width
         this.currentScale = windowWidth / this.skin.visual.width;
       }
 
       console.log(`[Resize] Window: ${windowWidth}x${windowHeight}, Scale: ${this.currentScale}, Aspect: skin=${aspectRatio.toFixed(2)}, window=${windowAspect.toFixed(2)}`);
 
-      // Apply scaling to the content wrapper
       contentWrapper.style.transform = `scale(${this.currentScale})`;
 
-      // Reposition and resize terminal (outside wrapper)
       this.skin.regions.forEach((region) => {
         if (region.type === "terminal") {
           const container = document.getElementById(`region-${region.id}`) as HTMLElement;
@@ -280,8 +237,17 @@ class TerminaiApp {
 
       // Use horizontal movement for resizing (feels more natural)
       const deltaX = e.clientX - startX;
-      const newWidth = startWidth + deltaX;
-      const newHeight = Math.round(newWidth / aspectRatio);
+      let newWidth = startWidth + deltaX;
+      let newHeight = Math.round(newWidth / aspectRatio);
+
+      // Enforce minimum size (native skin dimensions)
+      const minWidth = this.skin.visual.width;
+      const minHeight = this.skin.visual.height;
+
+      if (newWidth < minWidth) {
+        newWidth = minWidth;
+        newHeight = minHeight;
+      }
 
       console.log(`[PropResize] Delta: ${deltaX}, New: ${newWidth}x${newHeight}, Aspect: ${aspectRatio.toFixed(2)}`);
 
@@ -303,7 +269,7 @@ class TerminaiApp {
     };
 
     // Store this for use in the drag handler
-    (contentWrapper as any).__resizeInfo = {
+    (contentWrapper as HTMLElementWithResize).__resizeInfo = {
       isNearEdge: (e: MouseEvent) => {
         const rect = contentWrapper.getBoundingClientRect();
         return (
@@ -345,9 +311,9 @@ class TerminaiApp {
 
       // Check if clicking on resize handle
       const contentWrapper = document.getElementById("content-wrapper");
-      if (contentWrapper && (contentWrapper as any).__resizeInfo) {
-        const resizeInfo = (contentWrapper as any).__resizeInfo;
-        if (resizeInfo.isNearEdge(e)) {
+      if (contentWrapper && (contentWrapper as HTMLElementWithResize).__resizeInfo) {
+        const resizeInfo = (contentWrapper as HTMLElementWithResize).__resizeInfo;
+        if (resizeInfo && resizeInfo.isNearEdge(e)) {
           // Start resize instead of drag
           e.preventDefault();
           e.stopPropagation();

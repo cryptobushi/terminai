@@ -8,7 +8,7 @@ import type { Region } from "../types";
 import type { DataSource } from "../data/types";
 
 export const imageRenderer: RegionRenderer = {
-  mount(element: HTMLElement, region: Region, dataSource: DataSource, scale?: number): () => void {
+  mount(element: HTMLElement, region: Region, _dataSource: DataSource, _scale?: number): () => void {
     // Style the container
     element.style.background = "transparent";
     element.style.overflow = "hidden";
@@ -22,7 +22,7 @@ export const imageRenderer: RegionRenderer = {
     img.style.display = "block";
 
     // Set image source from region data
-    if (region.data?.imageUrl) {
+    if (region.data && 'imageUrl' in region.data) {
       img.src = region.data.imageUrl;
     }
 

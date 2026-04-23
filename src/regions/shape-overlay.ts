@@ -5,7 +5,7 @@
 import type { RegionRenderer } from "./types";
 
 export const shapeOverlayRenderer: RegionRenderer = {
-  mount(element: HTMLElement, region, dataSource, scale?: number): () => void {
+  mount(element: HTMLElement, region, _dataSource, _scale?: number): () => void {
     if (!region.shape) {
       return () => {};
     }
@@ -39,7 +39,7 @@ export const shapeOverlayRenderer: RegionRenderer = {
       svg.style.left = "0";
 
       const polygon = document.createElementNS("http://www.w3.org/2000/svg", "polygon");
-      const points = shape.points.map(p => `${p.x},${p.y}`).join(" ");
+      const points = shape.points.map((p: { x: number; y: number }) => `${p.x},${p.y}`).join(" ");
       polygon.setAttribute("points", points);
       polygon.setAttribute("fill", fillColor);
       polygon.setAttribute("stroke", strokeColor);

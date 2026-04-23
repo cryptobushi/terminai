@@ -10,7 +10,29 @@ export type RegionType =
   | "agent-status"
   | "memory-context"
   | "activity-feed"
-  | "decorative";
+  | "decorative"
+  | "image"
+  | "shape-overlay";
+
+/**
+ * Data structure for image regions
+ */
+export interface ImageRegionData {
+  /** URL or data URI for the image to display */
+  imageUrl: string;
+}
+
+/**
+ * Data structure for shape overlay regions
+ */
+export interface ShapeData {
+  type: "rectangle" | "circle" | "polygon";
+  fillColor?: string;
+  strokeColor?: string;
+  strokeWidth?: number;
+  opacity?: number;
+  points?: Array<{ x: number; y: number }>;
+}
 
 /**
  * Region definition - a functional zone within the skin
@@ -36,8 +58,11 @@ export interface Region {
   /** Optional locked state (for editor) */
   locked?: boolean;
 
-  /** Optional data (for image regions, etc.) */
-  data?: any;
+  /** Optional data for image regions, shape overlays, etc. */
+  data?: ImageRegionData | ShapeData;
+
+  /** Optional shape data for shape-overlay regions (alternative to data) */
+  shape?: ShapeData;
 }
 
 /**
@@ -79,14 +104,6 @@ export interface SkinManifest {
   /** Functional regions within the skin */
   regions: Region[];
 
-  /** DEPRECATED: Legacy single terminal region - use regions array instead */
-  terminalRegion?: {
-    x: number;
-    y: number;
-    width: number;
-    height: number;
-  };
-
   /** Action button bindings (for future WMZ buttons) */
   actions: Array<{
     id: string;
@@ -94,28 +111,4 @@ export interface SkinManifest {
     position: { x: number; y: number };
     // Handler will be bound later
   }>;
-}
-
-/**
- * IPC layer types - matches the Rust commands.rs contract
- */
-export interface IPCCommands {
-  create_pty_session(sessionId: string): Promise<void>;
-  write_to_pty(sessionId: string, data: string): Promise<void>;
-  resize_pty(sessionId: string, rows: number, cols: number): Promise<void>;
-  close_pty_session(sessionId: string): Promise<void>;
-}
-
-/**
- * Typed error from Rust backend
- */
-export interface TerminaiError {
-  type:
-    | "PtySpawnFailed"
-    | "PtyWriteFailed"
-    | "PtyReadFailed"
-    | "SessionNotFound"
-    | "InvalidInput"
-    | "InternalError";
-  message: string;
 }

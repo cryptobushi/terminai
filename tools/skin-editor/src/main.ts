@@ -8,6 +8,7 @@ import { regionRegistry, registerBuiltInRenderers } from "@terminai/regions";
 import type { DataSource } from "@terminai/data/types";
 import JSZip from "jszip";
 import { Canvas as FabricCanvas, Rect as FabricRect, Polygon as FabricPolygon, Object as FabricObject } from "fabric";
+import { loadImage, fileToDataUri } from "@terminai/utils/file-helpers";
 import "./style.css";
 
 class SkinEditor {
@@ -473,10 +474,10 @@ class SkinEditor {
 
     try {
       // Read file as data URI
-      const dataUri = await this.fileToDataUri(file);
+      const dataUri = await fileToDataUri(file);
 
       // Load image to get dimensions
-      const img = await this.loadImage(dataUri);
+      const img = await loadImage(dataUri);
 
       // Create image layer region
       const region: Region = {
@@ -513,14 +514,6 @@ class SkinEditor {
     input.value = '';
   }
 
-  private fileToDataUri(file: File): Promise<string> {
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => resolve(reader.result as string);
-      reader.onerror = reject;
-      reader.readAsDataURL(file);
-    });
-  }
 
   private async handleWmzLoad(e: Event): Promise<void> {
     const input = e.target as HTMLInputElement;
@@ -639,7 +632,7 @@ class SkinEditor {
 
           const bitmapBlob = await bitmapFile.async('blob');
           const imageUrl = await this.processBitmap(bitmapBlob);
-          const img = await this.loadImage(imageUrl);
+          const img = await loadImage(imageUrl);
 
           // Create unique ID - if there's already a region with this filename, append coordinates
           let regionId = filename.replace('.bmp', '');
@@ -747,7 +740,7 @@ class SkinEditor {
         const imageUrl = await this.processBitmap(bitmapBlob);
 
         // Get bitmap dimensions by loading the image
-        const img = await this.loadImage(imageUrl);
+        const img = await loadImage(imageUrl);
 
         // Create region for this bitmap layer
         const region: Region = {
@@ -780,7 +773,7 @@ class SkinEditor {
       // Composite all bitmap layers in z-index order
       for (const region of bitmapRegions) {
         if (region.data?.imageUrl) {
-          const img = await this.loadImage(region.data.imageUrl);
+          const img = await loadImage(region.data.imageUrl);
           ctx.drawImage(img, region.rect.x, region.rect.y);
         }
       }
@@ -939,7 +932,7 @@ class SkinEditor {
   private async processBitmap(bitmapBlob: Blob): Promise<string> {
     // Load BMP into an image element
     const bmpUrl = URL.createObjectURL(bitmapBlob);
-    const img = await this.loadImage(bmpUrl);
+    const img = await loadImage(bmpUrl);
 
     // Create canvas to process the image
     const canvas = document.createElement('canvas');
@@ -979,14 +972,6 @@ class SkinEditor {
     return URL.createObjectURL(processedBlob);
   }
 
-  private loadImage(src: string): Promise<HTMLImageElement> {
-    return new Promise((resolve, reject) => {
-      const img = new Image();
-      img.onload = () => resolve(img);
-      img.onerror = reject;
-      img.src = src;
-    });
-  }
 
   private handleCanvasMouseDown(e: MouseEvent): void {
     // Disable all canvas interaction in preview mode

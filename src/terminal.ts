@@ -48,18 +48,14 @@ export class TerminalSession {
 
     // Set up resize observer to reflow terminal when window resizes
     this.resizeObserver = new ResizeObserver(() => {
-      try {
-        this.fitAddon.fit();
-        const dims = this.fitAddon.proposeDimensions();
-        if (dims) {
-          console.log(`[Terminal] Resizing PTY to ${dims.cols}x${dims.rows}`);
-          // Fire and forget - don't await
-          this.resize(dims.rows, dims.cols).catch((err) => {
-            console.error("[Terminal] Resize failed:", err);
-          });
-        }
-      } catch (err) {
-        console.error("[Terminal] Resize observer error:", err);
+      this.fitAddon.fit();
+      const dims = this.fitAddon.proposeDimensions();
+      if (dims) {
+        console.log(`[Terminal] Resizing PTY to ${dims.cols}x${dims.rows}`);
+        // Fire and forget - don't await
+        this.resize(dims.rows, dims.cols).catch((err) => {
+          console.error("[Terminal] Resize failed:", err);
+        });
       }
     });
     this.resizeObserver.observe(containerElement);

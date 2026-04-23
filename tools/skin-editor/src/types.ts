@@ -1,30 +1,19 @@
 /**
  * Type definitions for skin editor
+ * Extends base types from main app with editor-specific properties
  */
 
-export type RegionType =
-  | "terminal"
-  | "agent-status"
-  | "memory-context"
-  | "activity-feed"
-  | "decorative"
-  | "shape-overlay"
-  | "image";
+import type { RegionType as BaseRegionType, Region as BaseRegion, SkinManifest as BaseSkinManifest } from "@terminai/types";
+
+// Extend RegionType with editor-specific region types
+export type RegionType = BaseRegionType | "shape-overlay" | "image";
 
 export type ShapeType = "rectangle" | "polygon";
 
-export interface Region {
-  id: string;
-  type: RegionType;
-  rect: {
-    x: number;
-    y: number;
-    width: number;
-    height: number;
-  };
-  zIndex?: number;
+// Extend Region interface with editor-specific properties
+export interface Region extends Omit<BaseRegion, 'type' | 'data'> {
+  type: RegionType; // Use extended type
   visible?: boolean; // Layer visibility toggle
-  locked?: boolean; // Layer lock state
   // Shape overlay properties
   shape?: {
     type: ShapeType;
@@ -35,13 +24,14 @@ export interface Region {
     // For polygons: array of points relative to rect.x, rect.y
     points?: Array<{ x: number; y: number }>;
   };
-  // Image layer properties
+  // Image layer properties (extends base data field)
   data?: {
     imageUrl?: string; // Base64 data URI or blob URL
     originalFileName?: string;
   };
 }
 
+// Editor uses a simplified SkinManifest (keeping separate for now)
 export interface SkinManifest {
   id: string;
   name: string;

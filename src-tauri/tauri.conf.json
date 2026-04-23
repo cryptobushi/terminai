@@ -16,6 +16,8 @@
         "title": "Terminai",
         "width": 760,
         "height": 394,
+        "minWidth": 760,
+        "minHeight": 394,
         "decorations": false,
         "transparent": true,
         "shadow": false,

@@ -70,7 +70,7 @@ export class SkinBundleLoader {
     // Validate image regions have embedded data
     manifest.regions.forEach((region, idx) => {
       if (region.type === "image") {
-        if (!region.data?.imageUrl) {
+        if (!region.data || !('imageUrl' in region.data)) {
           throw new Error(`Invalid skin bundle: image region ${idx} missing imageUrl`);
         }
         if (!region.data.imageUrl.startsWith("data:")) {
