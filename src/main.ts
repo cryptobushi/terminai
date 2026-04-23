@@ -318,6 +318,7 @@ class TerminaiApp {
       // Don't drag if clicking on terminal or buttons
       if (
         target.closest("#terminal-container") ||
+        target.closest(".xterm") ||
         target.closest(".action-button")
       ) {
         return;

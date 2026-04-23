@@ -6,6 +6,8 @@
   margin: 0;
   padding: 0;
   box-sizing: border-box;
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 html {
@@ -67,6 +69,8 @@ img {
   cursor: text; /* Normal text cursor for terminal */
   z-index: 10; /* Above chrome image */
   position: relative;
+  user-select: text; /* Allow text selection in terminal */
+  -webkit-user-select: text;
 }
 
 /* Ensure xterm terminal is opaque */
