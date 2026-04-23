@@ -1867,10 +1867,15 @@ class SkinEditor {
     this.state.regions.forEach((region) => {
       const container = this.canvasStage.querySelector(`[data-region-id="${region.id}"]`) as HTMLElement;
       const existingType = container?.getAttribute('data-region-type');
+      const existingShapeType = container?.getAttribute('data-shape-type');
 
-      // If type changed, remove old container and create new one
-      if (container && existingType && existingType !== region.type) {
-        console.log(`[Editor] Region type changed from ${existingType} to ${region.type}, recreating DOM`);
+      // If type or shape type changed, remove old container and create new one
+      const needsRecreate = container && (
+        (existingType && existingType !== region.type) ||
+        (region.type === 'shape-overlay' && existingShapeType && existingShapeType !== region.shape?.type)
+      );
+
+      if (needsRecreate) {
         container.remove();
         // Find and remove cleanup function for this region
         const regionIndex = this.regionCleanups.findIndex((_, idx) => {
@@ -1894,6 +1899,39 @@ class SkinEditor {
         existingContainer.style.zIndex = (region.zIndex !== undefined ? region.zIndex : 5).toString();
         existingContainer.style.display = (region.visible === false) ? 'none' : 'block';
         existingContainer.setAttribute('data-region-type', region.type);
+
+        // Update shape properties if this is a shape-overlay
+        if (region.type === 'shape-overlay' && region.shape) {
+          existingContainer.setAttribute('data-shape-type', region.shape.type);
+          const fillColor = region.shape.fillColor || '#ff0000';
+          const strokeColor = region.shape.strokeColor || 'transparent';
+          const strokeWidth = region.shape.strokeWidth || 0;
+          const opacity = region.shape.opacity !== undefined ? region.shape.opacity : 0.5;
+
+          if (region.shape.type === 'rectangle') {
+            existingContainer.style.background = fillColor;
+            existingContainer.style.border = strokeWidth > 0 ? `${strokeWidth}px solid ${strokeColor}` : 'none';
+            existingContainer.style.opacity = opacity.toString();
+            existingContainer.style.boxSizing = 'border-box';
+            existingContainer.style.borderRadius = '';
+          } else if (region.shape.type === 'circle') {
+            existingContainer.style.background = fillColor;
+            existingContainer.style.border = strokeWidth > 0 ? `${strokeWidth}px solid ${strokeColor}` : 'none';
+            existingContainer.style.opacity = opacity.toString();
+            existingContainer.style.boxSizing = 'border-box';
+            existingContainer.style.borderRadius = '50%';
+          } else if (region.shape.type === 'polygon') {
+            // Update SVG polygon attributes
+            const svg = existingContainer.querySelector('svg');
+            const polygon = svg?.querySelector('polygon');
+            if (polygon) {
+              polygon.setAttribute('fill', fillColor);
+              polygon.setAttribute('stroke', strokeColor);
+              polygon.setAttribute('stroke-width', strokeWidth.toString());
+              polygon.setAttribute('opacity', opacity.toString());
+            }
+          }
+        }
       } else {
         // Create new region DOM
         console.log(`[Editor] Creating new DOM for region: ${region.id}, type: ${region.type}`);
@@ -1908,6 +1946,9 @@ class SkinEditor {
         newContainer.className = "region-layer";
         newContainer.dataset.regionId = region.id;
         newContainer.setAttribute('data-region-type', region.type);
+        if (region.type === 'shape-overlay' && region.shape) {
+          newContainer.setAttribute('data-shape-type', region.shape.type);
+        }
         newContainer.style.position = "absolute";
         newContainer.style.left = `${region.rect.x}px`;
         newContainer.style.top = `${region.rect.y}px`;

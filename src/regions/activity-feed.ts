@@ -16,7 +16,7 @@ const EVENT_COLORS: Record<ActivityEvent["type"], string> = {
 };
 
 export const activityFeedRenderer: RegionRenderer = {
-  mount(element: HTMLElement, region: Region, dataSource: DataSource): () => void {
+  mount(element: HTMLElement, region: Region, dataSource: DataSource, scale?: number): () => void {
     // Apply base styling
     element.style.cssText = `
       display: flex;

@@ -10,12 +10,14 @@ import { registerBuiltInRenderers, regionRegistry } from "./regions";
 import { StubHermesDataSource } from "./data/stub-hermes";
 import type { DataSource } from "./data/types";
 import { SkinBundleLoader } from "./skins/bundle-loader";
+import { getTerminalSession } from "./regions/terminal";
 import "./style.css";
 
 class TerminaiApp {
   private skin: SkinManifest;
   private dataSource: DataSource;
   private regionCleanups: Array<() => void> = [];
+  private currentScale: number = 1.0;
 
   constructor(skin: SkinManifest) {
     this.skin = skin;
@@ -68,28 +70,27 @@ class TerminaiApp {
     const windowHeight = window.innerHeight;
     const windowAspect = windowWidth / windowHeight;
 
-    let scale: number;
     if (windowAspect > aspectRatio) {
       // Window is wider than skin - fit to height
-      scale = windowHeight / this.skin.visual.height;
+      this.currentScale = windowHeight / this.skin.visual.height;
     } else {
       // Window is taller than skin - fit to width
-      scale = windowWidth / this.skin.visual.width;
+      this.currentScale = windowWidth / this.skin.visual.width;
     }
 
     // Apply scaling transform with transform-origin at top-left
     contentWrapper.style.transformOrigin = "top left";
-    contentWrapper.style.transform = `scale(${scale})`;
+    contentWrapper.style.transform = `scale(${this.currentScale})`;
     contentWrapper.style.width = `${this.skin.visual.width}px`;
     contentWrapper.style.height = `${this.skin.visual.height}px`;
 
     // Center the scaled content
-    const scaledWidth = this.skin.visual.width * scale;
-    const scaledHeight = this.skin.visual.height * scale;
+    const scaledWidth = this.skin.visual.width * this.currentScale;
+    const scaledHeight = this.skin.visual.height * this.currentScale;
     contentWrapper.style.left = `${(windowWidth - scaledWidth) / 2}px`;
     contentWrapper.style.top = `${(windowHeight - scaledHeight) / 2}px`;
 
-    console.log(`[Terminai] Scale: ${scale}, Scaled size: ${scaledWidth}x${scaledHeight}, Window: ${windowWidth}x${windowHeight}`);
+    console.log(`[Terminai] Scale: ${this.currentScale}, Scaled size: ${scaledWidth}x${scaledHeight}, Window: ${windowWidth}x${windowHeight}`);
 
     // If we have a chrome image (real WMP skin), render it
     if (this.skin.visual.chromeImage) {
@@ -152,7 +153,7 @@ class TerminaiApp {
       }
 
       // Mount the renderer
-      const cleanup = renderer.mount(container, region, this.dataSource);
+      const cleanup = renderer.mount(container, region, this.dataSource, this.currentScale);
       this.regionCleanups.push(cleanup);
 
       contentWrapper.appendChild(container);
@@ -199,25 +200,30 @@ class TerminaiApp {
       const windowHeight = window.innerHeight;
       const windowAspect = windowWidth / windowHeight;
 
-      let scale: number;
       if (windowAspect > aspectRatio) {
         // Window is wider than skin - fit to height
-        scale = windowHeight / this.skin.visual.height;
+        this.currentScale = windowHeight / this.skin.visual.height;
       } else {
         // Window is taller than skin - fit to width
-        scale = windowWidth / this.skin.visual.width;
+        this.currentScale = windowWidth / this.skin.visual.width;
       }
 
-      console.log(`[Resize] Window: ${windowWidth}x${windowHeight}, Scale: ${scale}, Aspect: skin=${aspectRatio.toFixed(2)}, window=${windowAspect.toFixed(2)}`);
+      console.log(`[Resize] Window: ${windowWidth}x${windowHeight}, Scale: ${this.currentScale}, Aspect: skin=${aspectRatio.toFixed(2)}, window=${windowAspect.toFixed(2)}`);
 
       // Apply scaling transform
-      contentWrapper.style.transform = `scale(${scale})`;
+      contentWrapper.style.transform = `scale(${this.currentScale})`;
 
       // Center the scaled content
-      const scaledWidth = this.skin.visual.width * scale;
-      const scaledHeight = this.skin.visual.height * scale;
+      const scaledWidth = this.skin.visual.width * this.currentScale;
+      const scaledHeight = this.skin.visual.height * this.currentScale;
       contentWrapper.style.left = `${(windowWidth - scaledWidth) / 2}px`;
       contentWrapper.style.top = `${(windowHeight - scaledHeight) / 2}px`;
+
+      // Update terminal font size if terminal session exists
+      const terminal = getTerminalSession();
+      if (terminal && terminal.updateFontSize) {
+        terminal.updateFontSize(this.currentScale);
+      }
     };
 
     window.addEventListener("resize", resizeHandler);

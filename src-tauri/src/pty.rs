@@ -72,7 +72,9 @@ impl PtySession {
                     }
                     Ok(n) => {
                         let data = String::from_utf8_lossy(&buf[..n]).to_string();
-                        log::info!("PTY output: {} bytes: {:?}", n, &data[..n.min(50)]);
+                        // Truncate for logging using char boundaries, not byte boundaries
+                        let preview = data.chars().take(50).collect::<String>();
+                        log::info!("PTY output: {} bytes: {:?}", n, preview);
                         if let Err(e) = app_handle.emit(&format!("pty-output:{}", session_id), data) {
                             log::error!("Failed to emit pty output: {}", e);
                             break;

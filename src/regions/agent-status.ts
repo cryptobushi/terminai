@@ -8,7 +8,7 @@ import type { Region } from "../types";
 import type { DataSource } from "../data/types";
 
 export const agentStatusRenderer: RegionRenderer = {
-  mount(element: HTMLElement, region: Region, dataSource: DataSource): () => void {
+  mount(element: HTMLElement, region: Region, dataSource: DataSource, scale?: number): () => void {
     // Apply base styling
     element.style.cssText = `
       display: flex;

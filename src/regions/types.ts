@@ -15,11 +15,13 @@ export interface RegionRenderer {
    * @param element - DOM element to mount into
    * @param region - Region configuration
    * @param dataSource - Data source for agent state
+   * @param scale - Current UI scale factor (for responsive text sizing)
    * @returns Cleanup function to call on unmount
    */
   mount(
     element: HTMLElement,
     region: Region,
-    dataSource: DataSource
+    dataSource: DataSource,
+    scale?: number
   ): () => void;
 }

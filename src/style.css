@@ -40,6 +40,8 @@ body {
   /* Ensure content wrapper doesn't cause scrollbars */
   max-width: 100%;
   max-height: 100%;
+  background: transparent;
+  box-shadow: none;
 }
 
 #chrome-image {
@@ -71,6 +73,29 @@ img {
 #terminal-container .xterm {
   background-color: #000000 !important;
   opacity: 1 !important;
+}
+
+/* Smaller xterm scrollbar */
+.xterm .xterm-viewport {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(136, 255, 136, 0.5) rgba(0, 0, 0, 0.3);
+}
+
+.xterm .xterm-viewport::-webkit-scrollbar {
+  width: 3px;
+}
+
+.xterm .xterm-viewport::-webkit-scrollbar-track {
+  background: rgba(0, 0, 0, 0.2);
+}
+
+.xterm .xterm-viewport::-webkit-scrollbar-thumb {
+  background: rgba(136, 255, 136, 0.4);
+  border-radius: 2px;
+}
+
+.xterm .xterm-viewport::-webkit-scrollbar-thumb:hover {
+  background: rgba(136, 255, 136, 0.6);
 }
 
 /* Action buttons */
