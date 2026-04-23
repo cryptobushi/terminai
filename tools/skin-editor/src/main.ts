@@ -1,5 +1,5 @@
 /**
- * Terminai Skin Editor - Enhanced with drag, resize, snap-to-grid, undo/redo
+ * Terminai Skin Editor - Enhanced with drag, resize, snap-to-grid, undo/redo, and Fabric.js shape drawing
  */
 
 import type { EditorState, Region, SkinManifest, ResizeHandle } from "./types";
@@ -7,6 +7,7 @@ import { StubHermesDataSource } from "@terminai/data/stub-hermes";
 import { regionRegistry, registerBuiltInRenderers } from "@terminai/regions";
 import type { DataSource } from "@terminai/data/types";
 import JSZip from "jszip";
+import { Canvas as FabricCanvas, Rect as FabricRect, Polygon as FabricPolygon, Object as FabricObject } from "fabric";
 import "./style.css";
 
 class SkinEditor {
@@ -15,9 +16,12 @@ class SkinEditor {
     chromePath: null,
     regions: [],
     selectedRegion: null,
+    selectedRegions: [],
     hoveredRegion: null,
     isDrawing: false,
     drawStart: null,
+    drawMode: null,
+    polygonPoints: [],
     previewMode: false,
     snapToGrid: true,
     gridSize: 5,
@@ -29,21 +33,37 @@ class SkinEditor {
     resizeStart: null,
     history: [[]],
     historyIndex: 0,
+    zoom: 1.0,
+    panX: 0,
+    panY: 0,
   };
 
   private canvas!: HTMLCanvasElement;
   private ctx!: CanvasRenderingContext2D;
+  private fabricCanvas!: FabricCanvas;
   private chromeImg!: HTMLImageElement;
   private canvasStage!: HTMLElement;
   private readonly HANDLE_SIZE = 8;
   private regionCleanups: Array<() => void> = [];
   private dataSource: DataSource | null = null;
+  private isDrawingPolygon = false;
+  private polygonMode = false;
+  private isPanning = false;
+  private panStart: { x: number; y: number } | null = null;
+  private draggedLayerIndex: number | null = null;
 
   constructor() {
     this.canvas = document.getElementById("editor-canvas") as HTMLCanvasElement;
     this.ctx = this.canvas.getContext("2d")!;
     this.chromeImg = document.getElementById("chrome-image") as HTMLImageElement;
     this.canvasStage = document.getElementById("canvas-stage") as HTMLElement;
+
+    // Initialize Fabric.js canvas for shape drawing
+    this.fabricCanvas = new FabricCanvas("fabric-canvas", {
+      selection: false, // Disable multi-select for now
+      preserveObjectStacking: true,
+      renderOnAddRemove: true,
+    });
 
     // Register runtime renderers
     registerBuiltInRenderers();
@@ -67,6 +87,10 @@ class SkinEditor {
     const loadManifestInput = document.getElementById("load-manifest") as HTMLInputElement;
     loadManifestInput.addEventListener("change", (e) => this.handleManifestLoad(e));
 
+    // Image upload
+    const uploadImageInput = document.getElementById("upload-image") as HTMLInputElement;
+    uploadImageInput.addEventListener("change", (e) => this.handleImageUpload(e));
+
     // Export button
     const exportBtn = document.getElementById("export-manifest");
     exportBtn?.addEventListener("click", () => this.exportManifest());
@@ -83,13 +107,14 @@ class SkinEditor {
     this.canvas.addEventListener("mousedown", (e) => this.handleCanvasMouseDown(e));
     this.canvas.addEventListener("mousemove", (e) => this.handleCanvasMouseMove(e));
     this.canvas.addEventListener("mouseup", (e) => this.handleCanvasMouseUp(e));
+    this.canvas.addEventListener("wheel", (e) => this.handleCanvasWheel(e), { passive: false });
 
     // Keyboard shortcuts
     document.addEventListener("keydown", (e) => this.handleKeyDown(e));
 
     // Region properties
     document.getElementById("prop-id")?.addEventListener("input", () => this.updateSelectedRegion());
-    document.getElementById("prop-type")?.addEventListener("change", () => this.updateSelectedRegion());
+    // Note: prop-type listener is registered separately below to handle shape properties visibility
     document.getElementById("prop-x")?.addEventListener("input", () => this.updateSelectedRegion());
     document.getElementById("prop-y")?.addEventListener("input", () => this.updateSelectedRegion());
     document.getElementById("prop-width")?.addEventListener("input", () => this.updateSelectedRegion());
@@ -100,11 +125,83 @@ class SkinEditor {
     document.getElementById("delete-region")?.addEventListener("click", () => this.deleteSelectedRegion());
     document.getElementById("duplicate-region")?.addEventListener("click", () => this.duplicateSelectedRegion());
 
+    // Layer reordering
+    document.getElementById("move-layer-up")?.addEventListener("click", () => this.moveLayerUp());
+    document.getElementById("move-layer-down")?.addEventListener("click", () => this.moveLayerDown());
+
+    // Shape drawing buttons
+    document.getElementById("draw-rectangle")?.addEventListener("click", () => this.enterRectangleMode());
+    document.getElementById("draw-polygon")?.addEventListener("click", () => this.enterPolygonMode());
+
+    // Shape property listeners
+    document.getElementById("prop-shape-type")?.addEventListener("change", () => this.updateSelectedRegion());
+    document.getElementById("prop-stroke-width")?.addEventListener("input", () => this.updateSelectedRegion());
+    document.getElementById("prop-opacity")?.addEventListener("input", (e) => {
+      const value = (e.target as HTMLInputElement).value;
+      const valueSpan = document.getElementById("opacity-value");
+      if (valueSpan) valueSpan.textContent = `${value}%`;
+      this.updateSelectedRegion();
+    });
+
+    // Sync color picker with hex input (fill color)
+    document.getElementById("prop-fill-color")?.addEventListener("input", (e) => {
+      const colorValue = (e.target as HTMLInputElement).value;
+      const hexInput = document.getElementById("prop-fill-color-hex") as HTMLInputElement;
+      if (hexInput) hexInput.value = colorValue.toUpperCase();
+      this.updateSelectedRegion();
+    });
+
+    document.getElementById("prop-fill-color-hex")?.addEventListener("input", (e) => {
+      const hexValue = (e.target as HTMLInputElement).value;
+      if (/^#[0-9A-Fa-f]{6}$/.test(hexValue)) {
+        const colorPicker = document.getElementById("prop-fill-color") as HTMLInputElement;
+        if (colorPicker) colorPicker.value = hexValue;
+        this.updateSelectedRegion();
+      }
+    });
+
+    // Sync color picker with hex input (stroke color)
+    document.getElementById("prop-stroke-color")?.addEventListener("input", (e) => {
+      const colorValue = (e.target as HTMLInputElement).value;
+      const hexInput = document.getElementById("prop-stroke-color-hex") as HTMLInputElement;
+      if (hexInput) hexInput.value = colorValue.toUpperCase();
+      this.updateSelectedRegion();
+    });
+
+    document.getElementById("prop-stroke-color-hex")?.addEventListener("input", (e) => {
+      const hexValue = (e.target as HTMLInputElement).value;
+      if (/^#[0-9A-Fa-f]{6}$/.test(hexValue)) {
+        const colorPicker = document.getElementById("prop-stroke-color") as HTMLInputElement;
+        if (colorPicker) colorPicker.value = hexValue;
+        this.updateSelectedRegion();
+      }
+    });
+
+    // Type change listener to show/hide shape properties
+    document.getElementById("prop-type")?.addEventListener("change", (e) => {
+      const type = (e.target as HTMLSelectElement).value;
+      const shapeProps = document.getElementById("shape-properties");
+      if (shapeProps) {
+        shapeProps.style.display = type === "shape-overlay" ? "block" : "none";
+      }
+      this.updateSelectedRegion();
+      // Refresh the properties panel to show newly initialized shape values
+      this.updatePropertiesPanel();
+    });
+
     // Help button
     document.getElementById("help-button")?.addEventListener("click", () => this.toggleHelp());
 
     // Exit preview button
     document.getElementById("exit-preview-button")?.addEventListener("click", () => this.togglePreview());
+
+    // Alignment tools
+    document.getElementById("align-left")?.addEventListener("click", () => this.alignSelectedRegions("left"));
+    document.getElementById("align-right")?.addEventListener("click", () => this.alignSelectedRegions("right"));
+    document.getElementById("align-top")?.addEventListener("click", () => this.alignSelectedRegions("top"));
+    document.getElementById("align-bottom")?.addEventListener("click", () => this.alignSelectedRegions("bottom"));
+    document.getElementById("align-center-h")?.addEventListener("click", () => this.alignSelectedRegions("center-h"));
+    document.getElementById("align-center-v")?.addEventListener("click", () => this.alignSelectedRegions("center-v"));
   }
 
   private toggleHelp(): void {
@@ -140,6 +237,8 @@ class SkinEditor {
       this.state.historyIndex--;
       this.state.regions = JSON.parse(JSON.stringify(this.state.history[this.state.historyIndex]));
       this.state.selectedRegion = null;
+      this.state.selectedRegions = [];
+      this.updateAlignmentToolbar();
       this.renderRegionList();
       this.render();
       console.log("[Editor] Undo");
@@ -151,6 +250,8 @@ class SkinEditor {
       this.state.historyIndex++;
       this.state.regions = JSON.parse(JSON.stringify(this.state.history[this.state.historyIndex]));
       this.state.selectedRegion = null;
+      this.state.selectedRegions = [];
+      this.updateAlignmentToolbar();
       this.renderRegionList();
       this.render();
       console.log("[Editor] Redo");
@@ -164,7 +265,7 @@ class SkinEditor {
       return;
     }
 
-    // Escape to close help or exit preview
+    // Escape to close help, exit preview, exit drawing mode, or deselect
     if (e.key === "Escape") {
       const helpOverlay = document.getElementById("help-overlay");
       if (helpOverlay && helpOverlay.style.display !== "none") {
@@ -177,9 +278,20 @@ class SkinEditor {
         return;
       }
 
+      // If in drawing mode, exit it
+      if (this.state.drawMode !== null) {
+        this.exitDrawMode();
+        console.log("[Editor] ESC pressed - exited drawing mode");
+        return;
+      }
+
+      // Otherwise deselect current selection
       this.state.selectedRegion = null;
+      this.state.selectedRegions = [];
+      this.updateAlignmentToolbar();
       const propsPanel = document.getElementById("region-properties") as HTMLElement;
       propsPanel.style.display = "none";
+      this.renderRegionList();
       this.render();
       return;
     }
@@ -220,25 +332,32 @@ class SkinEditor {
       this.redo();
     }
 
-    // Arrow keys to move selected region
+    // Arrow keys to move selected regions
     if (this.state.selectedRegion && ["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].includes(e.key)) {
       e.preventDefault();
       const step = e.shiftKey ? this.state.gridSize : 1;
 
-      switch (e.key) {
-        case "ArrowUp":
-          this.state.selectedRegion.rect.y -= step;
-          break;
-        case "ArrowDown":
-          this.state.selectedRegion.rect.y += step;
-          break;
-        case "ArrowLeft":
-          this.state.selectedRegion.rect.x -= step;
-          break;
-        case "ArrowRight":
-          this.state.selectedRegion.rect.x += step;
-          break;
-      }
+      // Move all selected regions
+      const regionsToMove = this.state.selectedRegions.length > 0
+        ? this.state.selectedRegions
+        : [this.state.selectedRegion];
+
+      regionsToMove.forEach(region => {
+        switch (e.key) {
+          case "ArrowUp":
+            region.rect.y -= step;
+            break;
+          case "ArrowDown":
+            region.rect.y += step;
+            break;
+          case "ArrowLeft":
+            region.rect.x -= step;
+            break;
+          case "ArrowRight":
+            region.rect.x += step;
+            break;
+        }
+      });
 
       this.updatePropertiesPanel();
       this.render();
@@ -311,6 +430,10 @@ class SkinEditor {
       document.getElementById("export-manifest")?.removeAttribute("disabled");
       document.getElementById("toggle-preview")?.removeAttribute("disabled");
       document.getElementById("toggle-snap")?.removeAttribute("disabled");
+      document.getElementById("draw-rectangle")?.removeAttribute("disabled");
+      document.getElementById("draw-polygon")?.removeAttribute("disabled");
+      const uploadBtn = document.querySelector('.btn-image') as HTMLElement;
+      if (uploadBtn) uploadBtn.style.opacity = '1';
 
       console.log(`[Editor] Loaded chrome: ${img.width}x${img.height}`);
     };
@@ -327,11 +450,76 @@ class SkinEditor {
     const manifest: SkinManifest = JSON.parse(text);
 
     this.state.regions = manifest.regions || [];
+    // Initialize visibility for loaded regions
+    this.state.regions.forEach(r => {
+      if (r.visible === undefined) r.visible = true;
+    });
     this.saveHistory();
     this.renderRegionList();
     this.render();
 
     console.log(`[Editor] Loaded manifest with ${this.state.regions.length} regions`);
+  }
+
+  private async handleImageUpload(e: Event): Promise<void> {
+    const input = e.target as HTMLInputElement;
+    const file = input.files?.[0];
+    if (!file) return;
+
+    if (!this.state.chromeImage) {
+      alert("Please load a chrome image first to set canvas dimensions");
+      return;
+    }
+
+    try {
+      // Read file as data URI
+      const dataUri = await this.fileToDataUri(file);
+
+      // Load image to get dimensions
+      const img = await this.loadImage(dataUri);
+
+      // Create image layer region
+      const region: Region = {
+        id: `image-${Date.now()}`,
+        type: "image",
+        rect: {
+          x: 50, // Default position
+          y: 50,
+          width: img.width,
+          height: img.height,
+        },
+        zIndex: this.state.regions.length + 1,
+        visible: true,
+        locked: false,
+        data: {
+          imageUrl: dataUri,
+          originalFileName: file.name,
+        },
+      };
+
+      this.state.regions.push(region);
+      this.saveHistory();
+      this.renderRegionList();
+      this.selectRegion(region);
+      this.render();
+
+      console.log(`[Editor] Uploaded image: ${file.name} (${img.width}x${img.height})`);
+    } catch (error) {
+      console.error("[Editor] Failed to upload image:", error);
+      alert(`Failed to upload image: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    }
+
+    // Reset input so same file can be uploaded again
+    input.value = '';
+  }
+
+  private fileToDataUri(file: File): Promise<string> {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result as string);
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
   }
 
   private async handleWmzLoad(e: Event): Promise<void> {
@@ -354,7 +542,30 @@ class SkinEditor {
       }
 
       // Parse XML to get skin metadata
-      const xmlText = await zip.files[wmsFile].async('text');
+      // Read as array buffer first to detect encoding
+      const xmlBuffer = await zip.files[wmsFile].async('arraybuffer');
+      const xmlBytes = new Uint8Array(xmlBuffer);
+
+      // Detect UTF-16 by checking for BOM or null bytes pattern
+      let xmlText: string;
+      if (xmlBytes[0] === 0xFF && xmlBytes[1] === 0xFE) {
+        // UTF-16LE BOM
+        console.log("[Editor] Detected UTF-16LE encoding");
+        xmlText = new TextDecoder('utf-16le').decode(xmlBuffer);
+      } else if (xmlBytes[0] === 0xFE && xmlBytes[1] === 0xFF) {
+        // UTF-16BE BOM
+        console.log("[Editor] Detected UTF-16BE encoding");
+        xmlText = new TextDecoder('utf-16be').decode(xmlBuffer);
+      } else if (xmlBytes[1] === 0 || xmlBytes[3] === 0) {
+        // Likely UTF-16 without BOM (every other byte is null)
+        console.log("[Editor] Detected UTF-16 (no BOM, guessing LE)");
+        xmlText = new TextDecoder('utf-16le').decode(xmlBuffer);
+      } else {
+        // Default to UTF-8
+        console.log("[Editor] Using UTF-8 encoding");
+        xmlText = new TextDecoder('utf-8').decode(xmlBuffer);
+      }
+
       console.log("[Editor] XML content preview:", xmlText.substring(0, 300));
 
       const parser = new DOMParser();
@@ -614,6 +825,8 @@ class SkinEditor {
         document.getElementById("export-manifest")?.removeAttribute("disabled");
         document.getElementById("toggle-preview")?.removeAttribute("disabled");
         document.getElementById("toggle-snap")?.removeAttribute("disabled");
+        document.getElementById("draw-rectangle")?.removeAttribute("disabled");
+        document.getElementById("draw-polygon")?.removeAttribute("disabled");
 
         console.log(`[Editor] WMZ loaded: ${chromeImg.width}x${chromeImg.height} with ${this.state.regions.length} bitmap layers`);
       };
@@ -783,36 +996,81 @@ class SkinEditor {
     const x = e.clientX - rect.left;
     const y = e.clientY - rect.top;
 
+    // Check for Space key panning
+    if (e.button === 1 || (e.button === 0 && e.code === "Space")) {
+      this.isPanning = true;
+      this.panStart = { x: e.clientX, y: e.clientY };
+      this.canvas.style.cursor = "grabbing";
+      e.preventDefault();
+      return;
+    }
+
+    // Transform coordinates for zoom/pan
+    const transformedX = (x - this.state.panX) / this.state.zoom;
+    const transformedY = (y - this.state.panY) / this.state.zoom;
+
     // Check if clicking on resize handle of selected region
     if (this.state.selectedRegion) {
-      const handle = this.getResizeHandle(this.state.selectedRegion, x, y);
+      const handle = this.getResizeHandle(this.state.selectedRegion, transformedX, transformedY);
       if (handle) {
         this.state.isResizing = true;
         this.state.resizeHandle = handle;
-        this.state.resizeStart = { x, y };
+        this.state.resizeStart = { x: transformedX, y: transformedY };
         return;
       }
     }
 
     // Check if clicking on existing region
-    const clickedRegion = this.findRegionAtPoint(x, y);
+    const clickedRegion = this.findRegionAtPoint(transformedX, transformedY);
     if (clickedRegion) {
-      this.selectRegion(clickedRegion);
+      // Multi-select handling
+      if (e.shiftKey) {
+        // Shift+Click: Add to selection
+        if (!this.state.selectedRegions.includes(clickedRegion)) {
+          this.state.selectedRegions.push(clickedRegion);
+          this.state.selectedRegion = clickedRegion; // Make it primary
+          console.log(`[Editor] Shift+Click: Added region to selection (${this.state.selectedRegions.length} selected)`);
+        }
+      } else if (e.ctrlKey || e.metaKey) {
+        // Ctrl/Cmd+Click: Toggle selection
+        const index = this.state.selectedRegions.indexOf(clickedRegion);
+        if (index !== -1) {
+          this.state.selectedRegions.splice(index, 1);
+          // Update primary selection
+          if (this.state.selectedRegion === clickedRegion) {
+            this.state.selectedRegion = this.state.selectedRegions[0] || null;
+          }
+          console.log(`[Editor] Ctrl+Click: Removed region from selection (${this.state.selectedRegions.length} selected)`);
+        } else {
+          this.state.selectedRegions.push(clickedRegion);
+          this.state.selectedRegion = clickedRegion;
+          console.log(`[Editor] Ctrl+Click: Added region to selection (${this.state.selectedRegions.length} selected)`);
+        }
+      } else {
+        // Normal click: Single select
+        this.selectRegion(clickedRegion);
+      }
 
-      // Start dragging
+      this.updateAlignmentToolbar();
+      this.renderRegionList();
+      this.render();
+
+      // Start dragging all selected regions
       this.state.isDragging = true;
-      this.state.dragStart = { x, y };
+      this.state.dragStart = { x: transformedX, y: transformedY };
       this.state.dragOffset = {
-        x: x - clickedRegion.rect.x,
-        y: y - clickedRegion.rect.y,
+        x: transformedX - clickedRegion.rect.x,
+        y: transformedY - clickedRegion.rect.y,
       };
       return;
     }
 
     // Start drawing new region
     this.state.isDrawing = true;
-    this.state.drawStart = { x, y };
+    this.state.drawStart = { x: transformedX, y: transformedY };
     this.state.selectedRegion = null;
+    this.state.selectedRegions = [];
+    this.updateAlignmentToolbar();
   }
 
   private handleCanvasMouseMove(e: MouseEvent): void {
@@ -822,19 +1080,35 @@ class SkinEditor {
     const x = e.clientX - rect.left;
     const y = e.clientY - rect.top;
 
+    // Transform coordinates for zoom/pan
+    const transformedX = (x - this.state.panX) / this.state.zoom;
+    const transformedY = (y - this.state.panY) / this.state.zoom;
+
     // Update mouse coords display
     const coordsDisplay = document.getElementById("mouse-coords");
     if (coordsDisplay) {
-      coordsDisplay.textContent = `x: ${Math.floor(x)}, y: ${Math.floor(y)}`;
+      coordsDisplay.textContent = `x: ${Math.floor(transformedX)}, y: ${Math.floor(transformedY)}`;
+    }
+
+    // Handle panning
+    if (this.isPanning && this.panStart) {
+      const dx = e.clientX - this.panStart.x;
+      const dy = e.clientY - this.panStart.y;
+      this.state.panX += dx;
+      this.state.panY += dy;
+      this.panStart = { x: e.clientX, y: e.clientY };
+      this.render();
+      this.updateZoomDisplay();
+      return;
     }
 
     // Update cursor based on hover and track hovered region
     if (!this.state.isDrawing && !this.state.isDragging && !this.state.isResizing) {
       if (this.state.selectedRegion) {
-        const handle = this.getResizeHandle(this.state.selectedRegion, x, y);
+        const handle = this.getResizeHandle(this.state.selectedRegion, transformedX, transformedY);
         this.canvas.style.cursor = this.getCursorForHandle(handle);
       } else {
-        const region = this.findRegionAtPoint(x, y);
+        const region = this.findRegionAtPoint(transformedX, transformedY);
         this.canvas.style.cursor = region ? "move" : "crosshair";
 
         // Track hovered region for highlighting in region list
@@ -845,14 +1119,22 @@ class SkinEditor {
       }
     }
 
-    // Handle dragging
-    if (this.state.isDragging && this.state.selectedRegion && this.state.dragOffset) {
-      const newX = this.snap(x - this.state.dragOffset.x);
-      const newY = this.snap(y - this.state.dragOffset.y);
+    // Handle dragging - move all selected regions
+    if (this.state.isDragging && this.state.dragStart && this.state.dragOffset) {
+      const dx = transformedX - this.state.dragStart.x;
+      const dy = transformedY - this.state.dragStart.y;
 
-      this.state.selectedRegion.rect.x = newX;
-      this.state.selectedRegion.rect.y = newY;
+      // Move all selected regions
+      const regionsToMove = this.state.selectedRegions.length > 0
+        ? this.state.selectedRegions
+        : (this.state.selectedRegion ? [this.state.selectedRegion] : []);
 
+      regionsToMove.forEach(region => {
+        region.rect.x = this.snap(region.rect.x + dx);
+        region.rect.y = this.snap(region.rect.y + dy);
+      });
+
+      this.state.dragStart = { x: transformedX, y: transformedY };
       this.updatePropertiesPanel();
       this.render();
       this.canvas.style.cursor = "move";
@@ -861,8 +1143,8 @@ class SkinEditor {
 
     // Handle resizing
     if (this.state.isResizing && this.state.selectedRegion && this.state.resizeStart) {
-      const dx = x - this.state.resizeStart.x;
-      const dy = y - this.state.resizeStart.y;
+      const dx = transformedX - this.state.resizeStart.x;
+      const dy = transformedY - this.state.resizeStart.y;
       const region = this.state.selectedRegion;
       const handle = this.state.resizeHandle;
 
@@ -909,7 +1191,7 @@ class SkinEditor {
       if (region.rect.width < 10) region.rect.width = 10;
       if (region.rect.height < 10) region.rect.height = 10;
 
-      this.state.resizeStart = { x, y };
+      this.state.resizeStart = { x: transformedX, y: transformedY };
       this.updatePropertiesPanel();
       this.render();
       this.canvas.style.cursor = this.getCursorForHandle(handle);
@@ -918,8 +1200,8 @@ class SkinEditor {
 
     // Show drawing dimensions if currently drawing
     if (this.state.isDrawing && this.state.drawStart) {
-      const width = Math.abs(x - this.state.drawStart.x);
-      const height = Math.abs(y - this.state.drawStart.y);
+      const width = Math.abs(transformedX - this.state.drawStart.x);
+      const height = Math.abs(transformedY - this.state.drawStart.y);
       const drawingDisplay = document.getElementById("drawing-coords");
       if (drawingDisplay) {
         drawingDisplay.textContent = `Drawing: ${Math.floor(width)}x${Math.floor(height)}`;
@@ -928,19 +1210,30 @@ class SkinEditor {
       // Draw preview rectangle while dragging
       this.render();
 
-      // Draw preview rectangle
+      // Draw preview rectangle (apply transform)
+      this.ctx.save();
+      this.ctx.setTransform(this.state.zoom, 0, 0, this.state.zoom, this.state.panX, this.state.panY);
       this.ctx.strokeStyle = "#00ff00";
-      this.ctx.lineWidth = 2;
-      this.ctx.setLineDash([5, 5]);
-      const drawWidth = x - this.state.drawStart.x;
-      const drawHeight = y - this.state.drawStart.y;
+      this.ctx.lineWidth = 2 / this.state.zoom;
+      this.ctx.setLineDash([5 / this.state.zoom, 5 / this.state.zoom]);
+      const drawWidth = transformedX - this.state.drawStart.x;
+      const drawHeight = transformedY - this.state.drawStart.y;
       this.ctx.strokeRect(this.state.drawStart.x, this.state.drawStart.y, drawWidth, drawHeight);
       this.ctx.setLineDash([]);
+      this.ctx.restore();
     }
   }
 
   private handleCanvasMouseUp(e: MouseEvent): void {
     if (this.state.previewMode) return;
+
+    // End panning
+    if (this.isPanning) {
+      this.isPanning = false;
+      this.panStart = null;
+      this.canvas.style.cursor = "crosshair";
+      return;
+    }
 
     // End dragging
     if (this.state.isDragging) {
@@ -966,10 +1259,13 @@ class SkinEditor {
       const x = e.clientX - rect.left;
       const y = e.clientY - rect.top;
 
-      const minX = Math.min(this.state.drawStart.x, x);
-      const minY = Math.min(this.state.drawStart.y, y);
-      const width = Math.abs(x - this.state.drawStart.x);
-      const height = Math.abs(y - this.state.drawStart.y);
+      const transformedX = (x - this.state.panX) / this.state.zoom;
+      const transformedY = (y - this.state.panY) / this.state.zoom;
+
+      const minX = Math.min(this.state.drawStart.x, transformedX);
+      const minY = Math.min(this.state.drawStart.y, transformedY);
+      const width = Math.abs(transformedX - this.state.drawStart.x);
+      const height = Math.abs(transformedY - this.state.drawStart.y);
 
       // Only create region if it has some size
       if (width > 10 && height > 10) {
@@ -983,6 +1279,8 @@ class SkinEditor {
             height: this.snap(height),
           },
           zIndex: 10,
+          visible: true,
+          locked: false,
         };
 
         this.state.regions.push(newRegion);
@@ -1020,6 +1318,75 @@ class SkinEditor {
     this.render();
   }
 
+  private toggleVisibility(region: Region): void {
+    region.visible = !region.visible;
+    console.log(`[Editor] ${region.visible ? 'Shown' : 'Hidden'} region: ${region.id}`);
+    this.renderRegionList();
+    this.render();
+  }
+
+  private moveLayerUp(): void {
+    if (!this.state.selectedRegion) return;
+
+    const idx = this.state.regions.indexOf(this.state.selectedRegion);
+    if (idx < this.state.regions.length - 1) {
+      // Swap with next region (higher in visual stack)
+      [this.state.regions[idx], this.state.regions[idx + 1]] =
+        [this.state.regions[idx + 1], this.state.regions[idx]];
+
+      this.saveHistory();
+      this.renderRegionList();
+      this.render();
+      this.updateLayerButtons();
+      console.log(`[Editor] Moved layer up: ${this.state.selectedRegion.id}`);
+    }
+  }
+
+  private moveLayerDown(): void {
+    if (!this.state.selectedRegion) return;
+
+    const idx = this.state.regions.indexOf(this.state.selectedRegion);
+    if (idx > 0) {
+      // Swap with previous region (lower in visual stack)
+      [this.state.regions[idx], this.state.regions[idx - 1]] =
+        [this.state.regions[idx - 1], this.state.regions[idx]];
+
+      this.saveHistory();
+      this.renderRegionList();
+      this.render();
+      this.updateLayerButtons();
+      console.log(`[Editor] Moved layer down: ${this.state.selectedRegion.id}`);
+    }
+  }
+
+  private updateLayerButtons(): void {
+    if (!this.state.selectedRegion) {
+      document.getElementById("move-layer-up")?.setAttribute("disabled", "true");
+      document.getElementById("move-layer-down")?.setAttribute("disabled", "true");
+      return;
+    }
+
+    const idx = this.state.regions.indexOf(this.state.selectedRegion);
+    const upBtn = document.getElementById("move-layer-up");
+    const downBtn = document.getElementById("move-layer-down");
+
+    if (upBtn) {
+      if (idx < this.state.regions.length - 1) {
+        upBtn.removeAttribute("disabled");
+      } else {
+        upBtn.setAttribute("disabled", "true");
+      }
+    }
+
+    if (downBtn) {
+      if (idx > 0) {
+        downBtn.removeAttribute("disabled");
+      } else {
+        downBtn.setAttribute("disabled", "true");
+      }
+    }
+  }
+
   private findRegionAtPoint(x: number, y: number): Region | null {
     // Search in reverse order (top z-index first)
     // Skip locked regions
@@ -1037,12 +1404,16 @@ class SkinEditor {
 
   private selectRegion(region: Region): void {
     this.state.selectedRegion = region;
+    // Sync selectedRegions array for backwards compatibility
+    this.state.selectedRegions = [region];
 
     // Update properties panel
     const propsPanel = document.getElementById("region-properties") as HTMLElement;
     propsPanel.style.display = "block";
 
     this.updatePropertiesPanel();
+    this.updateLayerButtons();
+    this.updateAlignmentToolbar();
     this.render();
   }
 
@@ -1057,13 +1428,39 @@ class SkinEditor {
     (document.getElementById("prop-width") as HTMLInputElement).value = region.rect.width.toString();
     (document.getElementById("prop-height") as HTMLInputElement).value = region.rect.height.toString();
     (document.getElementById("prop-zindex") as HTMLInputElement).value = (region.zIndex || 10).toString();
+
+    // Show/hide shape properties based on type
+    const shapeProps = document.getElementById("shape-properties");
+    if (shapeProps) {
+      if (region.type === "shape-overlay" && region.shape) {
+        shapeProps.style.display = "block";
+
+        const fillColor = region.shape.fillColor || "#ff0000";
+        const strokeColor = region.shape.strokeColor || "#000000";
+
+        (document.getElementById("prop-shape-type") as HTMLSelectElement).value = region.shape.type;
+        (document.getElementById("prop-fill-color") as HTMLInputElement).value = fillColor;
+        (document.getElementById("prop-fill-color-hex") as HTMLInputElement).value = fillColor.toUpperCase();
+        (document.getElementById("prop-stroke-color") as HTMLInputElement).value = strokeColor;
+        (document.getElementById("prop-stroke-color-hex") as HTMLInputElement).value = strokeColor.toUpperCase();
+        (document.getElementById("prop-stroke-width") as HTMLInputElement).value = (region.shape.strokeWidth || 2).toString();
+
+        const opacity = Math.round((region.shape.opacity || 0.5) * 100);
+        (document.getElementById("prop-opacity") as HTMLInputElement).value = opacity.toString();
+        const opacityValue = document.getElementById("opacity-value");
+        if (opacityValue) opacityValue.textContent = `${opacity}%`;
+      } else {
+        shapeProps.style.display = "none";
+      }
+    }
   }
 
   private updateSelectedRegion(): void {
     if (!this.state.selectedRegion) return;
 
     this.state.selectedRegion.id = (document.getElementById("prop-id") as HTMLInputElement).value;
-    this.state.selectedRegion.type = (document.getElementById("prop-type") as HTMLSelectElement).value as any;
+    const newType = (document.getElementById("prop-type") as HTMLSelectElement).value as any;
+    this.state.selectedRegion.type = newType;
     this.state.selectedRegion.rect.x = parseInt((document.getElementById("prop-x") as HTMLInputElement).value) || 0;
     this.state.selectedRegion.rect.y = parseInt((document.getElementById("prop-y") as HTMLInputElement).value) || 0;
     this.state.selectedRegion.rect.width = parseInt((document.getElementById("prop-width") as HTMLInputElement).value) || 0;
@@ -1073,20 +1470,67 @@ class SkinEditor {
     const zIndex = parseInt((document.getElementById("prop-zindex") as HTMLInputElement).value) || 10;
     this.state.selectedRegion.zIndex = Math.max(1, zIndex);
 
+    // Update shape properties if this is a shape-overlay
+    if (this.state.selectedRegion.type === "shape-overlay") {
+      if (!this.state.selectedRegion.shape) {
+        this.state.selectedRegion.shape = {
+          type: "rectangle",
+          fillColor: "#ff0000",
+          strokeColor: "#000000",
+          strokeWidth: 2,
+          opacity: 0.5
+        };
+      }
+
+      const shapeType = (document.getElementById("prop-shape-type") as HTMLSelectElement).value as ShapeType;
+      const fillColor = (document.getElementById("prop-fill-color") as HTMLInputElement).value;
+      const strokeColor = (document.getElementById("prop-stroke-color") as HTMLInputElement).value;
+      const strokeWidth = parseInt((document.getElementById("prop-stroke-width") as HTMLInputElement).value) || 2;
+      const opacity = parseInt((document.getElementById("prop-opacity") as HTMLInputElement).value) / 100;
+
+      this.state.selectedRegion.shape.type = shapeType;
+      this.state.selectedRegion.shape.fillColor = fillColor;
+      this.state.selectedRegion.shape.strokeColor = strokeColor;
+      this.state.selectedRegion.shape.strokeWidth = strokeWidth;
+      this.state.selectedRegion.shape.opacity = opacity;
+
+      // Update Fabric.js object if it exists
+      this.updateFabricShape(this.state.selectedRegion);
+    }
+
     this.renderRegionList();
     this.render();
   }
 
-  private deleteSelectedRegion(): void {
-    if (!this.state.selectedRegion) return;
+  private updateFabricShape(region: Region): void {
+    if (!region.shape) return;
 
-    this.state.regions = this.state.regions.filter(r => r !== this.state.selectedRegion);
+    // Find and update the corresponding Fabric object
+    const fabricObjects = this.fabricCanvas.getObjects();
+
+    // For now, we'll just render the shape properties
+    // In a more complete implementation, we'd track Fabric objects per region
+  }
+
+  private deleteSelectedRegion(): void {
+    if (!this.state.selectedRegion && this.state.selectedRegions.length === 0) return;
+
+    // Delete all selected regions
+    const regionsToDelete = this.state.selectedRegions.length > 0
+      ? this.state.selectedRegions
+      : (this.state.selectedRegion ? [this.state.selectedRegion] : []);
+
+    console.log(`[Editor] Deleting ${regionsToDelete.length} region(s)`);
+
+    this.state.regions = this.state.regions.filter(r => !regionsToDelete.includes(r));
     this.state.selectedRegion = null;
+    this.state.selectedRegions = [];
     this.saveHistory();
 
     const propsPanel = document.getElementById("region-properties") as HTMLElement;
     propsPanel.style.display = "none";
 
+    this.updateAlignmentToolbar();
     this.renderRegionList();
     this.render();
   }
@@ -1143,35 +1587,102 @@ class SkinEditor {
     const listEl = document.getElementById("region-list")!;
 
     if (this.state.regions.length === 0) {
-      listEl.innerHTML = '<div class="empty-state">No regions yet. Click and drag on the canvas to create one.</div>';
+      listEl.innerHTML = '<div class="empty-state">No layers yet. Click and drag on the canvas to create one.</div>';
       return;
     }
 
+    // Render in reverse order so topmost layers appear first
     listEl.innerHTML = this.state.regions
-      .map((region, idx) => {
-        const isSelected = region === this.state.selectedRegion;
+      .slice()
+      .reverse()
+      .map((region, reverseIdx) => {
+        const idx = this.state.regions.length - 1 - reverseIdx;
+        const isSelected = this.state.selectedRegions.includes(region);
         const isHovered = region === this.state.hoveredRegion;
         const isLocked = region.locked || false;
+        const isVisible = region.visible !== false;
         const lockIcon = isLocked ? '🔒' : '🔓';
+        const visibilityIcon = isVisible ? '👁' : '👁‍🗨';
+
+        // Generate thumbnail based on layer type
+        let thumbnailHtml = '';
+        if (region.type === 'image' && region.data?.imageUrl) {
+          thumbnailHtml = `<div class="layer-thumbnail"><img src="${region.data.imageUrl}" /></div>`;
+        } else if (region.type === 'shape-overlay') {
+          const shapeIcon = region.shape?.type === 'polygon' ? '▲' : '■';
+          thumbnailHtml = `<div class="layer-thumbnail"><span class="layer-thumbnail-icon">${shapeIcon}</span></div>`;
+        } else {
+          thumbnailHtml = `<div class="layer-thumbnail"><span class="layer-thumbnail-icon">□</span></div>`;
+        }
+
         return `
-          <div class="region-item ${isSelected ? 'selected' : ''} ${isHovered ? 'hovered' : ''} ${isLocked ? 'locked' : ''}" data-idx="${idx}">
+          <div class="region-item ${isSelected ? 'selected' : ''} ${isHovered ? 'hovered' : ''} ${isLocked ? 'locked' : ''} ${!isVisible ? 'hidden' : ''}"
+               data-idx="${idx}"
+               data-region-type="${region.type}"
+               draggable="true">
+            <span class="visibility-icon" data-idx="${idx}" title="${isVisible ? 'Hide layer' : 'Show layer'}">${visibilityIcon}</span>
             <span class="lock-icon" data-idx="${idx}" title="${isLocked ? 'Unlock' : 'Lock'}">${lockIcon}</span>
-            <span class="region-icon">□</span>
+            ${thumbnailHtml}
             <span class="region-name">${region.id}</span>
-            <span class="region-type">${region.type}</span>
+            <span class="region-type" data-type-value="${region.type}">${region.type}</span>
           </div>
         `;
       })
       .join("");
 
-    // Add click handlers for region items
-    listEl.querySelectorAll(".region-item").forEach((item, idx) => {
-      item.addEventListener("click", (e) => {
-        // Don't select if clicking on lock icon
-        if ((e.target as HTMLElement).classList.contains('lock-icon')) {
+    // Add click handlers for region items with multi-select support
+    listEl.querySelectorAll(".region-item").forEach((item) => {
+      item.addEventListener("click", (e: Event) => {
+        const target = e.target as HTMLElement;
+        const mouseEvent = e as MouseEvent;
+
+        // Don't select if clicking on control icons
+        if (target.classList.contains('lock-icon') || target.classList.contains('visibility-icon')) {
           return;
         }
-        this.selectRegion(this.state.regions[idx]);
+
+        const idx = parseInt((item as HTMLElement).dataset.idx || '0');
+        const clickedRegion = this.state.regions[idx];
+
+        // Multi-select in layer list
+        if (mouseEvent.shiftKey) {
+          // Shift+Click: Add to selection
+          if (!this.state.selectedRegions.includes(clickedRegion)) {
+            this.state.selectedRegions.push(clickedRegion);
+            this.state.selectedRegion = clickedRegion;
+            console.log(`[Editor] Layer Shift+Click: Added to selection (${this.state.selectedRegions.length} selected)`);
+          }
+        } else if (mouseEvent.ctrlKey || mouseEvent.metaKey) {
+          // Ctrl/Cmd+Click: Toggle selection
+          const index = this.state.selectedRegions.indexOf(clickedRegion);
+          if (index !== -1) {
+            this.state.selectedRegions.splice(index, 1);
+            if (this.state.selectedRegion === clickedRegion) {
+              this.state.selectedRegion = this.state.selectedRegions[0] || null;
+            }
+            console.log(`[Editor] Layer Ctrl+Click: Removed from selection (${this.state.selectedRegions.length} selected)`);
+          } else {
+            this.state.selectedRegions.push(clickedRegion);
+            this.state.selectedRegion = clickedRegion;
+            console.log(`[Editor] Layer Ctrl+Click: Added to selection (${this.state.selectedRegions.length} selected)`);
+          }
+        } else {
+          // Normal click: Single select
+          this.selectRegion(clickedRegion);
+        }
+
+        this.updateAlignmentToolbar();
+        this.renderRegionList();
+        this.render();
+      });
+    });
+
+    // Add click handlers for visibility icons
+    listEl.querySelectorAll(".visibility-icon").forEach((icon) => {
+      icon.addEventListener("click", (e) => {
+        e.stopPropagation();
+        const idx = parseInt((icon as HTMLElement).dataset.idx || '0');
+        this.toggleVisibility(this.state.regions[idx]);
       });
     });
 
@@ -1181,6 +1692,78 @@ class SkinEditor {
         e.stopPropagation();
         const idx = parseInt((icon as HTMLElement).dataset.idx || '0');
         this.toggleLock(this.state.regions[idx]);
+      });
+    });
+
+    // Add drag-and-drop handlers for layer reordering
+    listEl.querySelectorAll(".region-item").forEach((item) => {
+      const htmlItem = item as HTMLElement;
+
+      htmlItem.addEventListener("dragstart", (e) => {
+        const idx = parseInt(htmlItem.dataset.idx || '0');
+        this.draggedLayerIndex = idx;
+        htmlItem.classList.add("dragging");
+        if (e.dataTransfer) {
+          e.dataTransfer.effectAllowed = "move";
+        }
+        console.log(`[Editor] Drag start: layer ${idx}`);
+      });
+
+      htmlItem.addEventListener("dragend", () => {
+        htmlItem.classList.remove("dragging");
+        // Remove all drop indicators
+        listEl.querySelectorAll(".region-item").forEach(el => {
+          el.classList.remove("drop-target-above", "drop-target-below");
+        });
+        this.draggedLayerIndex = null;
+      });
+
+      htmlItem.addEventListener("dragover", (e) => {
+        e.preventDefault();
+        if (this.draggedLayerIndex === null) return;
+
+        const targetIdx = parseInt(htmlItem.dataset.idx || '0');
+        if (targetIdx === this.draggedLayerIndex) return;
+
+        // Remove all drop indicators
+        listEl.querySelectorAll(".region-item").forEach(el => {
+          el.classList.remove("drop-target-above", "drop-target-below");
+        });
+
+        // Show drop indicator
+        if (targetIdx < this.draggedLayerIndex) {
+          htmlItem.classList.add("drop-target-above");
+        } else {
+          htmlItem.classList.add("drop-target-below");
+        }
+
+        if (e.dataTransfer) {
+          e.dataTransfer.dropEffect = "move";
+        }
+      });
+
+      htmlItem.addEventListener("drop", (e) => {
+        e.preventDefault();
+        if (this.draggedLayerIndex === null) return;
+
+        const targetIdx = parseInt(htmlItem.dataset.idx || '0');
+        if (targetIdx === this.draggedLayerIndex) return;
+
+        console.log(`[Editor] Drop: moving layer ${this.draggedLayerIndex} to ${targetIdx}`);
+
+        // Reorder regions array
+        const draggedRegion = this.state.regions[this.draggedLayerIndex];
+        this.state.regions.splice(this.draggedLayerIndex, 1);
+
+        // Adjust target index if dragging from earlier position
+        const newTargetIdx = this.draggedLayerIndex < targetIdx ? targetIdx : targetIdx;
+        this.state.regions.splice(newTargetIdx, 0, draggedRegion);
+
+        this.saveHistory();
+        this.renderRegionList();
+        this.render();
+
+        console.log(`[Editor] Layer reordered - new order:`, this.state.regions.map(r => r.id));
       });
     });
   }
@@ -1196,10 +1779,14 @@ class SkinEditor {
       return;
     }
 
+    // Apply zoom and pan transform for all drawing operations
+    this.ctx.save();
+    this.ctx.setTransform(this.state.zoom, 0, 0, this.state.zoom, this.state.panX, this.state.panY);
+
     // Draw grid if snap is enabled (EDIT MODE ONLY)
     if (this.state.snapToGrid && this.state.chromeImage) {
       this.ctx.strokeStyle = "rgba(100, 100, 100, 0.2)";
-      this.ctx.lineWidth = 1;
+      this.ctx.lineWidth = 1 / this.state.zoom;
       for (let x = 0; x < this.canvas.width; x += this.state.gridSize) {
         this.ctx.beginPath();
         this.ctx.moveTo(x, 0);
@@ -1216,35 +1803,60 @@ class SkinEditor {
 
     // Draw region overlays (EDIT MODE ONLY)
     this.state.regions.forEach((region) => {
-      // Skip locked regions - don't draw any editor decorations
-      if (region.locked) {
+      // Skip locked or hidden regions - don't draw any editor decorations
+      if (region.locked || region.visible === false) {
         return;
       }
 
-      const isSelected = region === this.state.selectedRegion;
+      const isSelected = this.state.selectedRegions.includes(region);
+      const isHovered = region === this.state.hoveredRegion;
 
-      // Region overlay
-      this.ctx.fillStyle = isSelected ? "rgba(0, 255, 0, 0.2)" : "rgba(0, 100, 255, 0.15)";
+      // Region overlay with different colors based on type
+      let fillColor = "rgba(0, 100, 255, 0.15)";
+      let strokeColor = "#0064ff";
+
+      if (isSelected) {
+        fillColor = "rgba(0, 255, 0, 0.2)";
+        strokeColor = "#00ff00";
+      } else if (isHovered) {
+        fillColor = "rgba(0, 170, 255, 0.2)";
+        strokeColor = "#00aaff";
+      } else if (region.type === 'image') {
+        fillColor = "rgba(255, 100, 0, 0.1)";
+        strokeColor = "#ff6400";
+      } else if (region.type === 'shape-overlay') {
+        fillColor = "rgba(255, 0, 255, 0.1)";
+        strokeColor = "#ff00ff";
+      }
+
+      this.ctx.fillStyle = fillColor;
       this.ctx.fillRect(region.rect.x, region.rect.y, region.rect.width, region.rect.height);
 
       // Border
-      this.ctx.strokeStyle = isSelected ? "#00ff00" : "#0064ff";
-      this.ctx.lineWidth = isSelected ? 3 : 1;
+      this.ctx.strokeStyle = strokeColor;
+      this.ctx.lineWidth = (isSelected ? 3 : (isHovered ? 2 : 1)) / this.state.zoom;
       this.ctx.strokeRect(region.rect.x, region.rect.y, region.rect.width, region.rect.height);
 
-      // Label
+      // Label with background for better readability
+      const labelBgHeight = 36;
+      this.ctx.fillStyle = "rgba(0, 0, 0, 0.7)";
+      this.ctx.fillRect(region.rect.x, region.rect.y, Math.min(region.rect.width, 200), labelBgHeight);
+
       this.ctx.fillStyle = "#ffffff";
-      this.ctx.font = "12px monospace";
+      this.ctx.font = `${12 / this.state.zoom}px monospace`;
       this.ctx.fillText(region.id, region.rect.x + 4, region.rect.y + 16);
-      this.ctx.font = "10px monospace";
+      this.ctx.font = `${10 / this.state.zoom}px monospace`;
       this.ctx.fillStyle = "#aaaaaa";
       this.ctx.fillText(region.type, region.rect.x + 4, region.rect.y + 30);
 
-      // Draw resize handles for selected region
-      if (isSelected) {
+      // Draw resize handles for primary selected region only
+      if (region === this.state.selectedRegion) {
         this.drawResizeHandles(region);
       }
     });
+
+    // Restore canvas transform
+    this.ctx.restore();
   }
 
   private renderRegionDOMs(): void {
@@ -1254,26 +1866,48 @@ class SkinEditor {
     // Update positions of existing region DOMs instead of recreating them
     this.state.regions.forEach((region) => {
       const container = this.canvasStage.querySelector(`[data-region-id="${region.id}"]`) as HTMLElement;
+      const existingType = container?.getAttribute('data-region-type');
 
-      if (container) {
-        // Update existing container position/size
-        container.style.left = `${region.rect.x}px`;
-        container.style.top = `${region.rect.y}px`;
-        container.style.width = `${region.rect.width}px`;
-        container.style.height = `${region.rect.height}px`;
-        container.style.zIndex = (region.zIndex !== undefined ? region.zIndex : 5).toString();
+      // If type changed, remove old container and create new one
+      if (container && existingType && existingType !== region.type) {
+        console.log(`[Editor] Region type changed from ${existingType} to ${region.type}, recreating DOM`);
+        container.remove();
+        // Find and remove cleanup function for this region
+        const regionIndex = this.regionCleanups.findIndex((_, idx) => {
+          const allContainers = Array.from(this.canvasStage.querySelectorAll('.region-layer'));
+          return allContainers[idx] === container;
+        });
+        if (regionIndex !== -1) {
+          this.regionCleanups[regionIndex]();
+          this.regionCleanups.splice(regionIndex, 1);
+        }
+      }
+
+      const existingContainer = this.canvasStage.querySelector(`[data-region-id="${region.id}"]`) as HTMLElement;
+
+      if (existingContainer) {
+        // Update existing container position/size/visibility
+        existingContainer.style.left = `${region.rect.x}px`;
+        existingContainer.style.top = `${region.rect.y}px`;
+        existingContainer.style.width = `${region.rect.width}px`;
+        existingContainer.style.height = `${region.rect.height}px`;
+        existingContainer.style.zIndex = (region.zIndex !== undefined ? region.zIndex : 5).toString();
+        existingContainer.style.display = (region.visible === false) ? 'none' : 'block';
+        existingContainer.setAttribute('data-region-type', region.type);
       } else {
         // Create new region DOM
-        console.log(`[Editor] Creating new DOM for region: ${region.id}`);
+        console.log(`[Editor] Creating new DOM for region: ${region.id}, type: ${region.type}`);
         const renderer = regionRegistry.get(region.type);
+        console.log(`[Editor] Renderer for ${region.type}:`, renderer ? 'FOUND' : 'NOT FOUND');
         if (!renderer || !this.dataSource) {
-          console.warn(`[Editor] No renderer found for region type: ${region.id}`);
+          console.warn(`[Editor] No renderer found for region type: ${region.type} (region id: ${region.id})`);
           return;
         }
 
         const newContainer = document.createElement("div");
         newContainer.className = "region-layer";
         newContainer.dataset.regionId = region.id;
+        newContainer.setAttribute('data-region-type', region.type);
         newContainer.style.position = "absolute";
         newContainer.style.left = `${region.rect.x}px`;
         newContainer.style.top = `${region.rect.y}px`;
@@ -1312,11 +1946,11 @@ class SkinEditor {
 
   private drawResizeHandles(region: Region): void {
     const r = region.rect;
-    const h = this.HANDLE_SIZE;
+    const h = this.HANDLE_SIZE / this.state.zoom;
 
     this.ctx.fillStyle = "#00ff00";
     this.ctx.strokeStyle = "#ffffff";
-    this.ctx.lineWidth = 1;
+    this.ctx.lineWidth = 1 / this.state.zoom;
 
     // Corner handles
     const corners = [
@@ -1343,6 +1977,108 @@ class SkinEditor {
       this.ctx.fillRect(edge.x - h / 2, edge.y - h / 2, h, h);
       this.ctx.strokeRect(edge.x - h / 2, edge.y - h / 2, h, h);
     });
+  }
+
+  private handleCanvasWheel(e: WheelEvent): void {
+    if (this.state.previewMode) return;
+
+    // Zoom with Ctrl/Cmd + Scroll
+    if (e.ctrlKey || e.metaKey) {
+      e.preventDefault();
+
+      const rect = this.canvas.getBoundingClientRect();
+      const mouseX = e.clientX - rect.left;
+      const mouseY = e.clientY - rect.top;
+
+      // Calculate mouse position in world coordinates before zoom
+      const worldX = (mouseX - this.state.panX) / this.state.zoom;
+      const worldY = (mouseY - this.state.panY) / this.state.zoom;
+
+      // Update zoom
+      const zoomDelta = e.deltaY > 0 ? 0.9 : 1.1;
+      const newZoom = Math.max(0.1, Math.min(10, this.state.zoom * zoomDelta));
+
+      // Adjust pan to keep mouse position fixed
+      this.state.panX = mouseX - worldX * newZoom;
+      this.state.panY = mouseY - worldY * newZoom;
+      this.state.zoom = newZoom;
+
+      this.render();
+      this.updateZoomDisplay();
+
+      console.log(`[Editor] Zoom: ${(this.state.zoom * 100).toFixed(0)}%`);
+    }
+  }
+
+  private updateZoomDisplay(): void {
+    const coordsDisplay = document.getElementById("mouse-coords");
+    if (coordsDisplay) {
+      const zoomPercent = Math.round(this.state.zoom * 100);
+      const currentText = coordsDisplay.textContent || "";
+      const coordsPart = currentText.split(" | ")[0] || currentText;
+      coordsDisplay.textContent = `${coordsPart} | Zoom: ${zoomPercent}%`;
+    }
+  }
+
+  private updateAlignmentToolbar(): void {
+    const toolbar = document.getElementById("alignment-toolbar");
+    if (toolbar) {
+      if (this.state.selectedRegions.length >= 2) {
+        toolbar.style.display = "flex";
+      } else {
+        toolbar.style.display = "none";
+      }
+    }
+  }
+
+  private alignSelectedRegions(alignment: string): void {
+    if (this.state.selectedRegions.length < 2) {
+      console.log("[Editor] Need at least 2 regions selected for alignment");
+      return;
+    }
+
+    console.log(`[Editor] Aligning ${this.state.selectedRegions.length} regions: ${alignment}`);
+
+    const regions = this.state.selectedRegions;
+
+    switch (alignment) {
+      case "left": {
+        const minX = Math.min(...regions.map(r => r.rect.x));
+        regions.forEach(r => r.rect.x = minX);
+        break;
+      }
+      case "right": {
+        const maxRight = Math.max(...regions.map(r => r.rect.x + r.rect.width));
+        regions.forEach(r => r.rect.x = maxRight - r.rect.width);
+        break;
+      }
+      case "top": {
+        const minY = Math.min(...regions.map(r => r.rect.y));
+        regions.forEach(r => r.rect.y = minY);
+        break;
+      }
+      case "bottom": {
+        const maxBottom = Math.max(...regions.map(r => r.rect.y + r.rect.height));
+        regions.forEach(r => r.rect.y = maxBottom - r.rect.height);
+        break;
+      }
+      case "center-h": {
+        const allCenters = regions.map(r => r.rect.x + r.rect.width / 2);
+        const avgCenter = allCenters.reduce((a, b) => a + b, 0) / allCenters.length;
+        regions.forEach(r => r.rect.x = avgCenter - r.rect.width / 2);
+        break;
+      }
+      case "center-v": {
+        const allCenters = regions.map(r => r.rect.y + r.rect.height / 2);
+        const avgCenter = allCenters.reduce((a, b) => a + b, 0) / allCenters.length;
+        regions.forEach(r => r.rect.y = avgCenter - r.rect.height / 2);
+        break;
+      }
+    }
+
+    this.saveHistory();
+    this.updatePropertiesPanel();
+    this.render();
   }
 
   private toggleSnap(): void {
@@ -1516,6 +2252,291 @@ class SkinEditor {
       console.error("[Editor] Failed to export skin bundle:", error);
       alert(`Failed to export skin bundle: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
+  }
+
+  /**
+   * Enter rectangle drawing mode
+   */
+  private enterRectangleMode(): void {
+    this.state.drawMode = "rectangle";
+    this.polygonMode = false;
+    this.state.polygonPoints = [];
+
+    // Update button states
+    document.getElementById("draw-rectangle")?.classList.add("active");
+    document.getElementById("draw-polygon")?.classList.remove("active");
+
+    let isDrawingRect = false;
+    let startPoint: { x: number; y: number } | null = null;
+    let tempRect: FabricRect | null = null;
+
+    // Mouse down - start rectangle
+    this.fabricCanvas.on('mouse:down', (options) => {
+      if (this.state.drawMode !== "rectangle") return;
+
+      const pointer = this.fabricCanvas.getPointer(options.e);
+      startPoint = {
+        x: Math.round(pointer.x),
+        y: Math.round(pointer.y)
+      };
+      isDrawingRect = true;
+
+      // Create temporary rectangle
+      tempRect = new FabricRect({
+        left: startPoint.x,
+        top: startPoint.y,
+        width: 0,
+        height: 0,
+        fill: 'rgba(255, 0, 0, 0.3)',
+        stroke: '#00aaff',
+        strokeWidth: 2,
+        selectable: false,
+        evented: false,
+      });
+      this.fabricCanvas.add(tempRect);
+    });
+
+    // Mouse move - resize rectangle
+    this.fabricCanvas.on('mouse:move', (options) => {
+      if (!isDrawingRect || !startPoint || !tempRect) return;
+
+      const pointer = this.fabricCanvas.getPointer(options.e);
+      const currentX = Math.round(pointer.x);
+      const currentY = Math.round(pointer.y);
+
+      const width = currentX - startPoint.x;
+      const height = currentY - startPoint.y;
+
+      // Update rectangle - handle negative dimensions
+      if (width >= 0) {
+        tempRect.set({ left: startPoint.x, width: width });
+      } else {
+        tempRect.set({ left: currentX, width: Math.abs(width) });
+      }
+
+      if (height >= 0) {
+        tempRect.set({ top: startPoint.y, height: height });
+      } else {
+        tempRect.set({ top: currentY, height: Math.abs(height) });
+      }
+
+      this.fabricCanvas.renderAll();
+    });
+
+    // Mouse up - finish rectangle
+    this.fabricCanvas.on('mouse:up', () => {
+      if (!isDrawingRect || !startPoint || !tempRect) return;
+
+      isDrawingRect = false;
+
+      // Check if rectangle has valid size
+      const width = tempRect.width || 0;
+      const height = tempRect.height || 0;
+
+      if (width < 5 || height < 5) {
+        // Too small, remove it
+        this.fabricCanvas.remove(tempRect);
+        console.log("[Editor] Rectangle too small, discarding");
+        return;
+      }
+
+      // Remove temporary rectangle
+      this.fabricCanvas.remove(tempRect);
+
+      // Create final rectangle shape
+      const finalRect = new FabricRect({
+        left: tempRect.left,
+        top: tempRect.top,
+        width: width,
+        height: height,
+        fill: 'rgba(255, 0, 0, 0.5)',
+        stroke: '#000000',
+        strokeWidth: 2,
+        selectable: true,
+        evented: true,
+      });
+      this.fabricCanvas.add(finalRect);
+
+      // Create region
+      const region: Region = {
+        id: `shape-${Date.now()}`,
+        type: "shape-overlay",
+        rect: {
+          x: Math.round(tempRect.left || 0),
+          y: Math.round(tempRect.top || 0),
+          width: Math.round(width),
+          height: Math.round(height)
+        },
+        zIndex: 100,
+        shape: {
+          type: "rectangle",
+          fillColor: "#ff0000",
+          strokeColor: "#000000",
+          strokeWidth: 2,
+          opacity: 0.5
+        }
+      };
+
+      this.state.regions.push(region);
+      this.saveHistory();
+      this.renderRegionList();
+      this.selectRegion(region);
+
+      // DON'T exit drawing mode - stay in rectangle mode for next shape
+      // User can press ESC or click another tool to exit
+      // Reset drawing state for next rectangle
+      startPoint = null;
+      tempRect = null;
+
+      console.log("[Editor] Created rectangle shape at", region.rect);
+    });
+
+    console.log("[Editor] Entered rectangle drawing mode - drag to create rectangles (ESC or V to exit)");
+  }
+
+  /**
+   * Enter polygon drawing mode
+   */
+  private enterPolygonMode(): void {
+    this.state.drawMode = "polygon";
+    this.polygonMode = true;
+    this.state.polygonPoints = [];
+
+    // Update button states
+    document.getElementById("draw-polygon")?.classList.add("active");
+    document.getElementById("draw-rectangle")?.classList.remove("active");
+
+    // Set up polygon drawing with Fabric.js
+    this.fabricCanvas.on('mouse:down', (options) => {
+      if (!this.polygonMode) return;
+
+      const pointer = this.fabricCanvas.getPointer(options.e);
+      const point = {
+        x: Math.round(pointer.x),
+        y: Math.round(pointer.y)
+      };
+
+      this.state.polygonPoints.push(point);
+
+      // Visual feedback - add a small circle at each point
+      const circle = new FabricRect({
+        left: point.x - 3,
+        top: point.y - 3,
+        width: 6,
+        height: 6,
+        fill: '#00aaff',
+        selectable: false,
+        evented: false,
+      });
+      this.fabricCanvas.add(circle);
+
+      console.log(`[Editor] Added polygon point: (${point.x}, ${point.y})`);
+    });
+
+    // Double-click to finish polygon
+    this.fabricCanvas.on('mouse:dblclick', () => {
+      if (this.polygonMode && this.state.polygonPoints.length >= 3) {
+        this.finishPolygon();
+      }
+    });
+
+    console.log("[Editor] Entered polygon drawing mode - click to add points, double-click to finish");
+  }
+
+  /**
+   * Finish drawing polygon and create shape region
+   */
+  private finishPolygon(): void {
+    if (this.state.polygonPoints.length < 3) {
+      alert("A polygon needs at least 3 points");
+      return;
+    }
+
+    // Calculate bounding box
+    const xs = this.state.polygonPoints.map(p => p.x);
+    const ys = this.state.polygonPoints.map(p => p.y);
+    const minX = Math.min(...xs);
+    const minY = Math.min(...ys);
+    const maxX = Math.max(...xs);
+    const maxY = Math.max(...ys);
+
+    // Convert points to be relative to bounding box
+    const relativePoints = this.state.polygonPoints.map(p => ({
+      x: p.x - minX,
+      y: p.y - minY
+    }));
+
+    // Create the polygon shape
+    const polygon = new FabricPolygon(this.state.polygonPoints, {
+      fill: 'rgba(255, 0, 0, 0.5)',
+      stroke: '#000000',
+      strokeWidth: 2,
+      selectable: true,
+      evented: true,
+    });
+
+    this.fabricCanvas.add(polygon);
+
+    // Clear visual feedback circles
+    this.fabricCanvas.getObjects().forEach(obj => {
+      if (obj.width === 6 && obj.height === 6) {
+        this.fabricCanvas.remove(obj);
+      }
+    });
+
+    // Create region
+    const region: Region = {
+      id: `shape-${Date.now()}`,
+      type: "shape-overlay",
+      rect: {
+        x: minX,
+        y: minY,
+        width: maxX - minX,
+        height: maxY - minY
+      },
+      zIndex: 100,
+      shape: {
+        type: "polygon",
+        fillColor: "#ff0000",
+        strokeColor: "#000000",
+        strokeWidth: 2,
+        opacity: 0.5,
+        points: relativePoints
+      }
+    };
+
+    this.state.regions.push(region);
+    this.saveHistory();
+    this.renderRegionList();
+    this.selectRegion(region);
+
+    // DON'T exit polygon mode - stay in polygon mode for next shape
+    // User can press ESC or click another tool to exit
+    // Reset polygon state for next polygon
+    this.state.polygonPoints = [];
+
+    console.log("[Editor] Created polygon shape with", relativePoints.length, "points - ready for next polygon (ESC or V to exit)");
+  }
+
+  /**
+   * Exit drawing mode
+   */
+  private exitDrawMode(): void {
+    this.state.drawMode = null;
+    this.polygonMode = false;
+    this.state.polygonPoints = [];
+
+    // Remove button active states
+    document.getElementById("draw-rectangle")?.classList.remove("active");
+    document.getElementById("draw-polygon")?.classList.remove("active");
+
+    // Remove all Fabric event listeners
+    this.fabricCanvas.off('mouse:down');
+    this.fabricCanvas.off('mouse:move');
+    this.fabricCanvas.off('mouse:up');
+    this.fabricCanvas.off('mouse:dblclick');
+
+    console.log("[Editor] Exited drawing mode");
   }
 }
 

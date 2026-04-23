@@ -24,6 +24,14 @@
             <input type="file" id="load-manifest" accept="application/json" style="display: none;" />
             Import Manifest
           </label>
+          <label class="btn btn-image">
+            <input type="file" id="upload-image" accept="image/*" style="display: none;" />
+            Upload Image
+          </label>
+          <div class="btn-group">
+            <button id="draw-rectangle" class="btn" disabled title="Draw rectangle shape overlay">Rectangle</button>
+            <button id="draw-polygon" class="btn" disabled title="Draw custom polygon (click to add points, double-click to finish)">Polygon</button>
+          </div>
           <button id="toggle-snap" class="btn" disabled>Snap: ON</button>
           <button id="export-manifest" class="btn" disabled>Export Skin Bundle</button>
           <button id="toggle-preview" class="btn" disabled>Preview Mode</button>
@@ -40,19 +48,37 @@
             <div id="canvas-stage">
               <img id="chrome-image" style="display: none;" />
               <canvas id="editor-canvas"></canvas>
+              <canvas id="fabric-canvas"></canvas>
             </div>
           </div>
           <div class="canvas-info">
-            <span id="mouse-coords">x: 0, y: 0</span>
+            <span id="mouse-coords">x: 0, y: 0 | Zoom: 100%</span>
             <span id="drawing-coords"></span>
+          </div>
+
+          <!-- Alignment Toolbar (appears when 2+ regions selected) -->
+          <div id="alignment-toolbar" class="alignment-toolbar" style="display: none;">
+            <span class="toolbar-label">Align:</span>
+            <button id="align-left" class="btn-icon" title="Align Left">⫸</button>
+            <button id="align-right" class="btn-icon" title="Align Right">⫷</button>
+            <button id="align-top" class="btn-icon" title="Align Top">⫯</button>
+            <button id="align-bottom" class="btn-icon" title="Align Bottom">⫰</button>
+            <button id="align-center-h" class="btn-icon" title="Center Horizontally">↔</button>
+            <button id="align-center-v" class="btn-icon" title="Center Vertically">↕</button>
           </div>
         </div>
 
         <!-- Right: Region Inspector -->
         <div class="inspector-panel">
-          <h2>Regions</h2>
+          <div class="inspector-header">
+            <h2>Layers</h2>
+            <div class="layer-controls">
+              <button id="move-layer-up" class="btn-icon" title="Move layer up" disabled>↑</button>
+              <button id="move-layer-down" class="btn-icon" title="Move layer down" disabled>↓</button>
+            </div>
+          </div>
           <div id="region-list" class="region-list">
-            <div class="empty-state">No regions yet. Click and drag on the canvas to create one.</div>
+            <div class="empty-state">No layers yet. Click and drag on the canvas to create one.</div>
           </div>
 
           <div id="region-properties" class="region-properties" style="display: none;">
@@ -70,7 +96,40 @@
                 <option value="activity-feed">activity-feed</option>
                 <option value="image">image</option>
                 <option value="decorative">decorative</option>
+                <option value="shape-overlay">shape-overlay</option>
               </select>
+            </div>
+            <div id="shape-properties" style="display: none;">
+              <div class="form-group">
+                <label>Shape Type:</label>
+                <select id="prop-shape-type">
+                  <option value="rectangle">Rectangle</option>
+                  <option value="polygon">Polygon</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label>Fill Color:</label>
+                <div class="color-input-group">
+                  <input type="color" id="prop-fill-color" value="#ff0000" />
+                  <input type="text" id="prop-fill-color-hex" placeholder="#FF0000" maxlength="7" />
+                </div>
+              </div>
+              <div class="form-group">
+                <label>Stroke Color:</label>
+                <div class="color-input-group">
+                  <input type="color" id="prop-stroke-color" value="#000000" />
+                  <input type="text" id="prop-stroke-color-hex" placeholder="#000000" maxlength="7" />
+                </div>
+              </div>
+              <div class="form-group">
+                <label>Stroke Width:</label>
+                <input type="number" id="prop-stroke-width" value="2" min="0" max="20" />
+              </div>
+              <div class="form-group">
+                <label>Opacity:</label>
+                <input type="range" id="prop-opacity" value="50" min="0" max="100" />
+                <span id="opacity-value">50%</span>
+              </div>
             </div>
             <div class="form-group">
               <label>Position:</label>
@@ -118,8 +177,32 @@
               <span>Select region</span>
             </div>
             <div class="shortcut-item">
+              <kbd>Shift + Click</kbd>
+              <span>Add to selection</span>
+            </div>
+            <div class="shortcut-item">
+              <kbd>Ctrl/Cmd + Click</kbd>
+              <span>Toggle selection</span>
+            </div>
+            <div class="shortcut-item">
+              <kbd>Ctrl/Cmd + Scroll</kbd>
+              <span>Zoom in/out</span>
+            </div>
+            <div class="shortcut-item">
+              <kbd>Space + Drag</kbd>
+              <span>Pan canvas</span>
+            </div>
+            <div class="shortcut-item">
+              <kbd>Middle Mouse Drag</kbd>
+              <span>Pan canvas</span>
+            </div>
+            <div class="shortcut-item">
               <kbd>Drag region</kbd>
-              <span>Move selected region</span>
+              <span>Move selected regions</span>
+            </div>
+            <div class="shortcut-item">
+              <kbd>Drag layer</kbd>
+              <span>Reorder layers</span>
             </div>
             <div class="shortcut-item">
               <kbd>Drag handles</kbd>

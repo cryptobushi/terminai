@@ -191,6 +191,73 @@ export const decorativeRenderer: PreviewRenderer = {
   },
 };
 
+// Shape Overlay Renderer - renders visual shapes in preview mode
+export const shapeOverlayRenderer: PreviewRenderer = {
+  mount(element: HTMLElement, region: Region): () => void {
+    if (!region.shape) {
+      return () => {};
+    }
+
+    const shape = region.shape;
+    const fillColor = shape.fillColor || "#ff0000";
+    const strokeColor = shape.strokeColor || "#000000";
+    const strokeWidth = shape.strokeWidth || 2;
+    const opacity = shape.opacity !== undefined ? shape.opacity : 0.5;
+
+    if (shape.type === "rectangle") {
+      // Rectangle shape
+      element.style.cssText = `
+        background: ${fillColor};
+        border: ${strokeWidth}px solid ${strokeColor};
+        opacity: ${opacity};
+        box-sizing: border-box;
+      `;
+    } else if (shape.type === "polygon" && shape.points && shape.points.length > 0) {
+      // Polygon shape using SVG
+      const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+      svg.setAttribute("width", "100%");
+      svg.setAttribute("height", "100%");
+      svg.style.position = "absolute";
+      svg.style.top = "0";
+      svg.style.left = "0";
+
+      const polygon = document.createElementNS("http://www.w3.org/2000/svg", "polygon");
+      const points = shape.points.map(p => `${p.x},${p.y}`).join(" ");
+      polygon.setAttribute("points", points);
+      polygon.setAttribute("fill", fillColor);
+      polygon.setAttribute("stroke", strokeColor);
+      polygon.setAttribute("stroke-width", strokeWidth.toString());
+      polygon.setAttribute("opacity", opacity.toString());
+
+      svg.appendChild(polygon);
+      element.appendChild(svg);
+    }
+
+    return () => {};
+  },
+};
+
+// Image Renderer - renders uploaded images in preview mode
+export const imageRenderer: PreviewRenderer = {
+  mount(element: HTMLElement, region: Region): () => void {
+    if (!region.data?.imageUrl) {
+      return () => {};
+    }
+
+    const img = document.createElement("img");
+    img.src = region.data.imageUrl;
+    img.style.cssText = `
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+    `;
+
+    element.appendChild(img);
+
+    return () => {};
+  },
+};
+
 // Renderer registry
 export const previewRenderers: Record<string, PreviewRenderer> = {
   "terminal": terminalRenderer,
@@ -198,4 +265,6 @@ export const previewRenderers: Record<string, PreviewRenderer> = {
   "activity-feed": activityFeedRenderer,
   "memory-context": memoryContextRenderer,
   "decorative": decorativeRenderer,
+  "shape-overlay": shapeOverlayRenderer,
+  "image": imageRenderer,
 };
