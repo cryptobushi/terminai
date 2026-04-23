@@ -42,17 +42,12 @@ export const terminalRenderer: RegionRenderer = {
   mount(element: HTMLElement, region: Region, dataSource: DataSource): () => void {
     if (isTauriEnvironment()) {
       // Real terminal in Tauri
-      element.style.cssText = `
-        background: #000000;
-        border: 1px solid rgba(255, 255, 255, 0.1);
-        border-radius: 4px;
-        overflow: hidden;
-        width: 100%;
-        height: 100%;
-        max-width: 100%;
-        max-height: 100%;
-        box-sizing: border-box;
-      `;
+      // DO NOT use cssText as it replaces position/size set by parent
+      element.style.background = "#000000";
+      element.style.border = "1px solid rgba(255, 255, 255, 0.1)";
+      element.style.borderRadius = "4px";
+      element.style.overflow = "hidden";
+      element.style.boxSizing = "border-box";
 
       const terminal = new TerminalSession("main", element);
       terminal.init();

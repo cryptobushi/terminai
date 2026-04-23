@@ -45,6 +45,7 @@ export interface EditorState {
   chromePath: string | null;
   regions: Region[];
   selectedRegion: Region | null;
+  hoveredRegion: Region | null;
   isDrawing: boolean;
   drawStart: { x: number; y: number } | null;
   previewMode: boolean;

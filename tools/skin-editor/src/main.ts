@@ -15,6 +15,7 @@ class SkinEditor {
     chromePath: null,
     regions: [],
     selectedRegion: null,
+    hoveredRegion: null,
     isDrawing: false,
     drawStart: null,
     previewMode: false,
@@ -97,6 +98,7 @@ class SkinEditor {
 
     // Delete region
     document.getElementById("delete-region")?.addEventListener("click", () => this.deleteSelectedRegion());
+    document.getElementById("duplicate-region")?.addEventListener("click", () => this.duplicateSelectedRegion());
 
     // Help button
     document.getElementById("help-button")?.addEventListener("click", () => this.toggleHelp());
@@ -198,6 +200,12 @@ class SkinEditor {
     if ((e.key === "Delete" || e.key === "Backspace") && this.state.selectedRegion) {
       e.preventDefault();
       this.deleteSelectedRegion();
+    }
+
+    // Duplicate (Cmd/Ctrl + D)
+    if ((e.ctrlKey || e.metaKey) && e.key === "d" && this.state.selectedRegion) {
+      e.preventDefault();
+      this.duplicateSelectedRegion();
     }
 
     // Undo
@@ -820,7 +828,7 @@ class SkinEditor {
       coordsDisplay.textContent = `x: ${Math.floor(x)}, y: ${Math.floor(y)}`;
     }
 
-    // Update cursor based on hover
+    // Update cursor based on hover and track hovered region
     if (!this.state.isDrawing && !this.state.isDragging && !this.state.isResizing) {
       if (this.state.selectedRegion) {
         const handle = this.getResizeHandle(this.state.selectedRegion, x, y);
@@ -828,6 +836,12 @@ class SkinEditor {
       } else {
         const region = this.findRegionAtPoint(x, y);
         this.canvas.style.cursor = region ? "move" : "crosshair";
+
+        // Track hovered region for highlighting in region list
+        if (this.state.hoveredRegion !== region) {
+          this.state.hoveredRegion = region;
+          this.renderRegionList();
+        }
       }
     }
 
@@ -991,10 +1005,28 @@ class SkinEditor {
     }
   }
 
+  private toggleLock(region: Region): void {
+    region.locked = !region.locked;
+    console.log(`[Editor] ${region.locked ? 'Locked' : 'Unlocked'} region: ${region.id}`);
+
+    // If we're locking the currently selected region, deselect it
+    if (region.locked && region === this.state.selectedRegion) {
+      this.state.selectedRegion = null;
+      const propsPanel = document.getElementById("region-properties") as HTMLElement;
+      propsPanel.style.display = "none";
+    }
+
+    this.renderRegionList();
+    this.render();
+  }
+
   private findRegionAtPoint(x: number, y: number): Region | null {
     // Search in reverse order (top z-index first)
+    // Skip locked regions
     for (let i = this.state.regions.length - 1; i >= 0; i--) {
       const region = this.state.regions[i];
+      if (region.locked) continue; // Skip locked regions
+
       const r = region.rect;
       if (x >= r.x && x <= r.x + r.width && y >= r.y && y <= r.y + r.height) {
         return region;
@@ -1036,7 +1068,10 @@ class SkinEditor {
     this.state.selectedRegion.rect.y = parseInt((document.getElementById("prop-y") as HTMLInputElement).value) || 0;
     this.state.selectedRegion.rect.width = parseInt((document.getElementById("prop-width") as HTMLInputElement).value) || 0;
     this.state.selectedRegion.rect.height = parseInt((document.getElementById("prop-height") as HTMLInputElement).value) || 0;
-    this.state.selectedRegion.zIndex = parseInt((document.getElementById("prop-zindex") as HTMLInputElement).value) || 10;
+
+    // Enforce minimum z-index of 1 (0 is reserved for chrome layer)
+    const zIndex = parseInt((document.getElementById("prop-zindex") as HTMLInputElement).value) || 10;
+    this.state.selectedRegion.zIndex = Math.max(1, zIndex);
 
     this.renderRegionList();
     this.render();
@@ -1056,6 +1091,54 @@ class SkinEditor {
     this.render();
   }
 
+  private duplicateSelectedRegion(): void {
+    if (!this.state.selectedRegion) return;
+
+    const original = this.state.selectedRegion;
+
+    // Create a deep copy of the region
+    const duplicate: Region = {
+      id: this.generateUniqueId(original.id),
+      type: original.type,
+      rect: {
+        x: original.rect.x + 20, // Offset by 20px so it's visible
+        y: original.rect.y + 20,
+        width: original.rect.width,
+        height: original.rect.height,
+      },
+      zIndex: original.zIndex,
+      locked: false, // Don't copy the locked state
+      data: original.data ? JSON.parse(JSON.stringify(original.data)) : undefined, // Deep copy data
+    };
+
+    this.state.regions.push(duplicate);
+    this.saveHistory();
+
+    // Select the newly duplicated region
+    this.selectRegion(duplicate);
+
+    this.renderRegionList();
+    this.render();
+
+    console.log(`[Editor] Duplicated region ${original.id} as ${duplicate.id}`);
+  }
+
+  private generateUniqueId(baseId: string): string {
+    // Remove any existing copy suffix
+    const baseName = baseId.replace(/_copy\d*$/, '');
+
+    // Find all regions with similar IDs
+    let copyNumber = 1;
+    let newId = `${baseName}_copy`;
+
+    while (this.state.regions.some(r => r.id === newId)) {
+      copyNumber++;
+      newId = `${baseName}_copy${copyNumber}`;
+    }
+
+    return newId;
+  }
+
   private renderRegionList(): void {
     const listEl = document.getElementById("region-list")!;
 
@@ -1067,8 +1150,12 @@ class SkinEditor {
     listEl.innerHTML = this.state.regions
       .map((region, idx) => {
         const isSelected = region === this.state.selectedRegion;
+        const isHovered = region === this.state.hoveredRegion;
+        const isLocked = region.locked || false;
+        const lockIcon = isLocked ? '🔒' : '🔓';
         return `
-          <div class="region-item ${isSelected ? 'selected' : ''}" data-idx="${idx}">
+          <div class="region-item ${isSelected ? 'selected' : ''} ${isHovered ? 'hovered' : ''} ${isLocked ? 'locked' : ''}" data-idx="${idx}">
+            <span class="lock-icon" data-idx="${idx}" title="${isLocked ? 'Unlock' : 'Lock'}">${lockIcon}</span>
             <span class="region-icon">□</span>
             <span class="region-name">${region.id}</span>
             <span class="region-type">${region.type}</span>
@@ -1077,10 +1164,23 @@ class SkinEditor {
       })
       .join("");
 
-    // Add click handlers
+    // Add click handlers for region items
     listEl.querySelectorAll(".region-item").forEach((item, idx) => {
-      item.addEventListener("click", () => {
+      item.addEventListener("click", (e) => {
+        // Don't select if clicking on lock icon
+        if ((e.target as HTMLElement).classList.contains('lock-icon')) {
+          return;
+        }
         this.selectRegion(this.state.regions[idx]);
+      });
+    });
+
+    // Add click handlers for lock icons
+    listEl.querySelectorAll(".lock-icon").forEach((icon) => {
+      icon.addEventListener("click", (e) => {
+        e.stopPropagation();
+        const idx = parseInt((icon as HTMLElement).dataset.idx || '0');
+        this.toggleLock(this.state.regions[idx]);
       });
     });
   }
@@ -1116,6 +1216,11 @@ class SkinEditor {
 
     // Draw region overlays (EDIT MODE ONLY)
     this.state.regions.forEach((region) => {
+      // Skip locked regions - don't draw any editor decorations
+      if (region.locked) {
+        return;
+      }
+
       const isSelected = region === this.state.selectedRegion;
 
       // Region overlay
@@ -1303,37 +1408,114 @@ class SkinEditor {
     console.log("[Editor] Preview mode: exited");
   }
 
-  private exportManifest(): void {
+  /**
+   * Convert an image URL (blob or data URI) to a base64 data URI
+   */
+  private async imageToDataUri(url: string): Promise<string> {
+    // If already a data URI, return as-is
+    if (url.startsWith('data:')) {
+      return url;
+    }
+
+    // If it's a blob URL, fetch and convert to data URI
+    return new Promise((resolve, reject) => {
+      const img = new Image();
+      img.crossOrigin = 'anonymous';
+
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        canvas.width = img.width;
+        canvas.height = img.height;
+
+        const ctx = canvas.getContext('2d');
+        if (!ctx) {
+          reject(new Error('Failed to get canvas context'));
+          return;
+        }
+
+        ctx.drawImage(img, 0, 0);
+
+        try {
+          const dataUri = canvas.toDataURL('image/png');
+          resolve(dataUri);
+        } catch (e) {
+          reject(e);
+        }
+      };
+
+      img.onerror = () => {
+        reject(new Error(`Failed to load image: ${url}`));
+      };
+
+      img.src = url;
+    });
+  }
+
+  private async exportManifest(): Promise<void> {
     if (!this.state.chromeImage) {
       alert("Please load a chrome image first");
       return;
     }
 
-    const manifest: SkinManifest = {
-      id: "custom-skin",
-      name: "Custom Skin",
-      version: "1.0.0",
-      visual: {
-        width: this.state.chromeImage.width,
-        height: this.state.chromeImage.height,
-        chromeImage: `/skins/custom-skin/${this.state.chromePath}`,
-      },
-      regions: this.state.regions,
-      actions: [],
-    };
+    console.log("[Editor] Exporting skin bundle with embedded images...");
 
-    const json = JSON.stringify(manifest, null, 2);
-    const blob = new Blob([json], { type: "application/json" });
-    const url = URL.createObjectURL(blob);
+    try {
+      // Convert chrome image to base64 data URI
+      const chromeDataUri = await this.imageToDataUri(this.state.chromeImage.src);
+      console.log("[Editor] Chrome image converted:", chromeDataUri.substring(0, 50) + '...');
 
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = "manifest.json";
-    a.click();
+      // Process regions and embed image data URIs
+      const regionsWithEmbeddedImages = await Promise.all(
+        this.state.regions.map(async (region) => {
+          if (region.type === 'image' && region.data?.imageUrl) {
+            // Convert blob URL or ensure it's a data URI
+            const imageDataUri = await this.imageToDataUri(region.data.imageUrl);
+            console.log(`[Editor] Region ${region.id} image converted:`, imageDataUri.substring(0, 50) + '...');
 
-    URL.revokeObjectURL(url);
+            return {
+              ...region,
+              data: {
+                imageUrl: imageDataUri,
+              },
+            };
+          }
+          return region;
+        })
+      );
 
-    console.log("[Editor] Exported manifest:", manifest);
+      const manifest: SkinManifest = {
+        id: "custom-skin",
+        name: "Custom Skin",
+        version: "1.0.0",
+        visual: {
+          width: this.state.chromeImage.width,
+          height: this.state.chromeImage.height,
+          chromeImage: chromeDataUri,
+        },
+        regions: regionsWithEmbeddedImages,
+        actions: [],
+      };
+
+      const json = JSON.stringify(manifest, null, 2);
+      const blob = new Blob([json], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "skin-bundle.json";
+      a.click();
+
+      URL.revokeObjectURL(url);
+
+      console.log("[Editor] Exported skin bundle with", this.state.regions.length, "regions");
+      console.log("[Editor] Chrome image size:", chromeDataUri.length, "bytes");
+      console.log("[Editor] Total bundle size:", json.length, "bytes");
+
+      alert(`Skin bundle exported successfully!\n\nBundle size: ${(json.length / 1024).toFixed(1)} KB\nRegions: ${this.state.regions.length}`);
+    } catch (error) {
+      console.error("[Editor] Failed to export skin bundle:", error);
+      alert(`Failed to export skin bundle: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    }
   }
 }
 

@@ -32,6 +32,12 @@ export interface Region {
 
   /** Optional z-index for layering */
   zIndex?: number;
+
+  /** Optional locked state (for editor) */
+  locked?: boolean;
+
+  /** Optional data (for image regions, etc.) */
+  data?: any;
 }
 
 /**
@@ -65,6 +71,9 @@ export interface SkinManifest {
 
     /** Chrome image (PNG with alpha channel for shape) - for real WMP skins */
     chromeImage?: string;
+
+    /** Z-index for chrome layer (defaults to 9999 if not specified) */
+    chromeZIndex?: number;
   };
 
   /** Functional regions within the skin */
