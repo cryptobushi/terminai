@@ -19,10 +19,8 @@ export class TerminalSession {
   constructor(sessionId: string, containerElement: HTMLElement, scale: number = 1.0) {
     this.sessionId = sessionId;
 
-    // Calculate scaled font size - inversely scale to compensate for CSS transform scale
-    // When scale is small (0.5), font should be 2x larger (14 / 0.5 = 28)
-    // When scale is 1.0, font should be normal (14 / 1.0 = 14)
-    const scaledFontSize = Math.max(6, Math.min(7, Math.floor(this.baseFontSize / scale)));
+    // Terminal is outside scaled wrapper, so use base font size for crisp 1:1 rendering
+    const scaledFontSize = this.baseFontSize;
 
     // Create xterm.js terminal instance
     this.terminal = new Terminal({
@@ -135,19 +133,17 @@ export class TerminalSession {
 
   /**
    * Update font size based on new scale factor
+   * Terminal is outside wrapper, font stays constant, just refit
    */
   updateFontSize(scale: number): void {
-    // Inversely scale to compensate for CSS transform scale
-    const scaledFontSize = Math.max(6, Math.min(7, Math.floor(this.baseFontSize / scale)));
-    this.terminal.options.fontSize = scaledFontSize;
-
-    // Use setTimeout to ensure the font change is applied before fitting
+    // No font size change needed - terminal renders at 1:1 pixels
+    // Just refit to the new container dimensions
     setTimeout(() => {
       this.fitAddon.fit();
       const dims = this.fitAddon.proposeDimensions();
       if (dims) {
         this.resize(dims.rows, dims.cols).catch((err) => {
-          console.error("[Terminal] Resize after font change failed:", err);
+          console.error("[Terminal] Resize failed:", err);
         });
       }
     }, 0);

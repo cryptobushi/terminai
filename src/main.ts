@@ -78,19 +78,15 @@ class TerminaiApp {
       this.currentScale = windowWidth / this.skin.visual.width;
     }
 
-    // Apply scaling transform with transform-origin at top-left
-    contentWrapper.style.transformOrigin = "top left";
-    contentWrapper.style.transform = `scale(${this.currentScale})`;
+    // Set content wrapper to native skin size and scale it
     contentWrapper.style.width = `${this.skin.visual.width}px`;
     contentWrapper.style.height = `${this.skin.visual.height}px`;
+    contentWrapper.style.transform = `scale(${this.currentScale})`;
+    contentWrapper.style.transformOrigin = "top left";
+    contentWrapper.style.left = "0";
+    contentWrapper.style.top = "0";
 
-    // Center the scaled content
-    const scaledWidth = this.skin.visual.width * this.currentScale;
-    const scaledHeight = this.skin.visual.height * this.currentScale;
-    contentWrapper.style.left = `${(windowWidth - scaledWidth) / 2}px`;
-    contentWrapper.style.top = `${(windowHeight - scaledHeight) / 2}px`;
-
-    console.log(`[Terminai] Scale: ${this.currentScale}, Scaled size: ${scaledWidth}x${scaledHeight}, Window: ${windowWidth}x${windowHeight}`);
+    console.log(`[Terminai] Window: ${windowWidth}x${windowHeight}, Scale: ${this.currentScale}`);
 
     // If we have a chrome image (real WMP skin), render it
     if (this.skin.visual.chromeImage) {
@@ -144,20 +140,42 @@ class TerminaiApp {
       const container = document.createElement("div");
       container.id = `region-${region.id}`;
       container.style.position = "absolute";
-      container.style.left = `${region.rect.x}px`;
-      container.style.top = `${region.rect.y}px`;
-      container.style.width = `${region.rect.width}px`;
-      container.style.height = `${region.rect.height}px`;
-      if (region.zIndex !== undefined) {
-        container.style.zIndex = region.zIndex.toString();
+
+      if (region.type === "terminal") {
+        // Terminal gets rendered OUTSIDE the scaled wrapper for crisp text
+        // Position it at scaled coordinates on the app element
+        container.style.left = `${region.rect.x * this.currentScale}px`;
+        container.style.top = `${region.rect.y * this.currentScale}px`;
+        container.style.width = `${region.rect.width * this.currentScale}px`;
+        container.style.height = `${region.rect.height * this.currentScale}px`;
+        if (region.zIndex !== undefined) {
+          container.style.zIndex = region.zIndex.toString();
+        }
+
+        // Mount the renderer with scale = 1.0 since no CSS transform
+        const cleanup = renderer.mount(container, region, this.dataSource, 1.0);
+        this.regionCleanups.push(cleanup);
+
+        // Append to app, not contentWrapper
+        app.appendChild(container);
+        regionElements[region.id] = container;
+      } else {
+        // Other regions inside the scaled wrapper
+        container.style.left = `${region.rect.x}px`;
+        container.style.top = `${region.rect.y}px`;
+        container.style.width = `${region.rect.width}px`;
+        container.style.height = `${region.rect.height}px`;
+        if (region.zIndex !== undefined) {
+          container.style.zIndex = region.zIndex.toString();
+        }
+
+        // Mount the renderer
+        const cleanup = renderer.mount(container, region, this.dataSource, this.currentScale);
+        this.regionCleanups.push(cleanup);
+
+        contentWrapper.appendChild(container);
+        regionElements[region.id] = container;
       }
-
-      // Mount the renderer
-      const cleanup = renderer.mount(container, region, this.dataSource, this.currentScale);
-      this.regionCleanups.push(cleanup);
-
-      contentWrapper.appendChild(container);
-      regionElements[region.id] = container;
     });
 
     // Wire up speaker pulse animation
@@ -210,20 +228,21 @@ class TerminaiApp {
 
       console.log(`[Resize] Window: ${windowWidth}x${windowHeight}, Scale: ${this.currentScale}, Aspect: skin=${aspectRatio.toFixed(2)}, window=${windowAspect.toFixed(2)}`);
 
-      // Apply scaling transform
+      // Apply scaling to the content wrapper
       contentWrapper.style.transform = `scale(${this.currentScale})`;
 
-      // Center the scaled content
-      const scaledWidth = this.skin.visual.width * this.currentScale;
-      const scaledHeight = this.skin.visual.height * this.currentScale;
-      contentWrapper.style.left = `${(windowWidth - scaledWidth) / 2}px`;
-      contentWrapper.style.top = `${(windowHeight - scaledHeight) / 2}px`;
-
-      // Update terminal font size if terminal session exists
-      const terminal = getTerminalSession();
-      if (terminal && terminal.updateFontSize) {
-        terminal.updateFontSize(this.currentScale);
-      }
+      // Reposition and resize terminal (outside wrapper)
+      this.skin.regions.forEach((region) => {
+        if (region.type === "terminal") {
+          const container = document.getElementById(`region-${region.id}`) as HTMLElement;
+          if (container) {
+            container.style.left = `${region.rect.x * this.currentScale}px`;
+            container.style.top = `${region.rect.y * this.currentScale}px`;
+            container.style.width = `${region.rect.width * this.currentScale}px`;
+            container.style.height = `${region.rect.height * this.currentScale}px`;
+          }
+        }
+      });
     };
 
     window.addEventListener("resize", resizeHandler);
