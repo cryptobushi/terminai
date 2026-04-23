@@ -44,6 +44,10 @@ body {
   max-height: 100%;
   background: transparent;
   box-shadow: none;
+  /* Fix blurry text when scaled */
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
 }
 
 #chrome-image {
@@ -71,12 +75,26 @@ img {
   position: relative;
   user-select: text; /* Allow text selection in terminal */
   -webkit-user-select: text;
+  /* Crisp text rendering */
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+  /* Hardware acceleration for smoother rendering */
+  will-change: transform;
+  transform: translateZ(0);
 }
 
 /* Ensure xterm terminal is opaque */
 #terminal-container .xterm {
   background-color: #000000 !important;
   opacity: 1 !important;
+}
+
+/* Force crisp rendering on xterm canvas elements */
+#terminal-container .xterm canvas {
+  image-rendering: -webkit-optimize-contrast;
+  image-rendering: crisp-edges;
+  image-rendering: pixelated;
 }
 
 /* Smaller xterm scrollbar */
