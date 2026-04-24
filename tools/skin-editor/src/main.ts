@@ -15,6 +15,7 @@ class SkinEditor {
   private state: EditorState = {
     chromeImage: null,
     chromePath: null,
+    chromeZIndex: 100,
     regions: [],
     selectedRegion: null,
     selectedRegions: [],
@@ -467,17 +468,73 @@ class SkinEditor {
     const file = input.files?.[0];
     if (!file) return;
 
-    if (!this.state.chromeImage) {
-      alert("Please load a chrome image first to set canvas dimensions");
-      return;
-    }
-
     try {
       // Read file as data URI
       const dataUri = await fileToDataUri(file);
 
       // Load image to get dimensions
       const img = await loadImage(dataUri);
+
+      // If no chrome image loaded yet, use this as the base chrome image
+      if (!this.state.chromeImage) {
+        this.state.chromeImage = img;
+        this.state.chromePath = file.name;
+
+        // Set chrome img element
+        this.chromeImg.src = dataUri;
+        this.chromeImg.style.display = "block";
+
+        // Size canvas to match
+        this.canvas.width = img.width;
+        this.canvas.height = img.height;
+
+        // Size canvas-stage to contain everything
+        this.canvasStage.style.width = `${img.width}px`;
+        this.canvasStage.style.height = `${img.height}px`;
+
+        // Create a special chrome layer region so it appears in the layer list
+        const chromeRegion: Region = {
+          id: "chrome-layer",
+          type: "image",
+          rect: {
+            x: 0,
+            y: 0,
+            width: img.width,
+            height: img.height,
+          },
+          zIndex: this.state.chromeZIndex,
+          visible: true,
+          locked: true, // Lock it so it can't be moved/resized accidentally
+          data: {
+            imageUrl: dataUri,
+            originalFileName: file.name,
+          },
+        };
+
+        this.state.regions.push(chromeRegion);
+        this.saveHistory();
+        this.renderRegionList();
+
+        // Hide instructions
+        const instructions = document.getElementById("canvas-instructions");
+        if (instructions) instructions.style.display = "none";
+
+        // Enable buttons
+        document.getElementById("export-manifest")?.removeAttribute("disabled");
+        document.getElementById("toggle-preview")?.removeAttribute("disabled");
+        document.getElementById("toggle-snap")?.removeAttribute("disabled");
+        document.getElementById("draw-rectangle")?.removeAttribute("disabled");
+        document.getElementById("draw-polygon")?.removeAttribute("disabled");
+        const uploadBtn = document.querySelector('.btn-image') as HTMLElement;
+        if (uploadBtn) uploadBtn.style.opacity = '1';
+
+        this.render();
+        console.log(`[Editor] Auto-initialized canvas from first image: ${img.width}x${img.height}`);
+
+        // Reset input
+        input.value = '';
+        return;
+      }
 
       // Create image layer region
       const region: Region = {
@@ -2245,6 +2302,13 @@ class SkinEditor {
         })
       );
 
+      // Filter out the chrome layer from regions - it's exported separately
+      const exportRegions = regionsWithEmbeddedImages.filter(r => r.id !== "chrome-layer");
+
+      // Get chrome z-index from the chrome layer if it exists
+      const chromeLayer = this.state.regions.find(r => r.id === "chrome-layer");
+      const chromeZIndex = chromeLayer?.zIndex ?? this.state.chromeZIndex;
+
       const manifest: SkinManifest = {
         id: "custom-skin",
         name: "Custom Skin",
@@ -2253,8 +2317,9 @@ class SkinEditor {
           width: this.state.chromeImage.width,
           height: this.state.chromeImage.height,
           chromeImage: chromeDataUri,
+          chromeZIndex: chromeZIndex,
         },
-        regions: regionsWithEmbeddedImages,
+        regions: exportRegions,
         actions: [],
       };
 

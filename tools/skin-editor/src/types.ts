@@ -40,6 +40,7 @@ export interface SkinManifest {
     width: number;
     height: number;
     chromeImage?: string;
+    chromeZIndex?: number;
   };
   regions: Region[];
   actions: Array<{
@@ -56,6 +57,7 @@ export type DrawMode = "rectangle" | "polygon" | null;
 export interface EditorState {
   chromeImage: HTMLImageElement | null;
   chromePath: string | null;
+  chromeZIndex: number;
   regions: Region[];
   selectedRegion: Region | null;
   selectedRegions: Region[]; // Multi-select support

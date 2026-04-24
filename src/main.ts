@@ -26,6 +26,7 @@ class TerminaiApp {
   private dataSource: DataSource;
   private regionCleanups: Array<() => void> = [];
   private currentScale: number = 1.0;
+  private windowResizeHandler?: () => void;
 
   constructor(skin: SkinManifest) {
     this.skin = skin;
@@ -38,6 +39,56 @@ class TerminaiApp {
     registerBuiltInRenderers();
     this.renderSkin();
     console.log("[Terminai] Ready");
+  }
+
+  /**
+   * Reload the app with a new skin without destroying terminal session
+   */
+  async reloadSkin(newSkin: SkinManifest): Promise<void> {
+    console.log("[Terminai] Reloading skin:", newSkin.name);
+
+    // Clean up old skin (but preserve terminal session)
+    this.cleanup();
+
+    // Update skin reference
+    this.skin = newSkin;
+
+    // Render new skin
+    this.renderSkin();
+
+    console.log("[Terminai] Skin reloaded successfully");
+  }
+
+  /**
+   * Clean up current skin rendering (except terminal session)
+   */
+  private cleanup(): void {
+    console.log("[Terminai] Cleaning up old skin");
+
+    // Call all region cleanup functions
+    // Terminal cleanup will only detach, not destroy the session
+    this.regionCleanups.forEach((cleanup) => {
+      try {
+        cleanup();
+      } catch (err) {
+        console.error("[Terminai] Cleanup error:", err);
+      }
+    });
+    this.regionCleanups = [];
+
+    // Remove window resize handler
+    if (this.windowResizeHandler) {
+      window.removeEventListener("resize", this.windowResizeHandler);
+      this.windowResizeHandler = undefined;
+    }
+
+    // Clear the app container
+    const app = document.getElementById("app");
+    if (app) {
+      app.innerHTML = "";
+    }
+
+    console.log("[Terminai] Cleanup complete");
   }
 
   private renderSkin(): void {
@@ -78,6 +129,10 @@ class TerminaiApp {
 
     console.log(`[Terminai] Window: ${windowWidth}x${windowHeight}, Scale: ${this.currentScale}`);
 
+    app.appendChild(contentWrapper);
+
+    // Chrome image rendered as sibling to contentWrapper and terminal
+    // so z-index properly stacks with terminal
     if (this.skin.visual.chromeImage) {
       const chromeImg = document.createElement("img");
       chromeImg.id = "chrome-image";
@@ -85,13 +140,14 @@ class TerminaiApp {
       chromeImg.style.position = "absolute";
       chromeImg.style.top = "0";
       chromeImg.style.left = "0";
-      chromeImg.style.width = "100%";
-      chromeImg.style.height = "100%";
+      chromeImg.style.width = `${this.skin.visual.width * this.currentScale}px`;
+      chromeImg.style.height = `${this.skin.visual.height * this.currentScale}px`;
       chromeImg.style.maxWidth = "none";
       chromeImg.style.maxHeight = "none";
       chromeImg.style.pointerEvents = "none";
       chromeImg.style.userSelect = "none";
-      chromeImg.style.zIndex = (this.skin.visual.chromeZIndex ?? 0).toString();
+      chromeImg.style.transformOrigin = "top left";
+      chromeImg.style.zIndex = (this.skin.visual.chromeZIndex ?? 100).toString();
 
       chromeImg.onload = () => {
         console.log("[Terminai] Chrome image loaded successfully:", this.skin.visual.chromeImage);
@@ -100,10 +156,8 @@ class TerminaiApp {
         console.error("[Terminai] Chrome image failed to load:", this.skin.visual.chromeImage, e);
       };
 
-      contentWrapper.appendChild(chromeImg);
+      app.appendChild(chromeImg);
     }
-
-    app.appendChild(contentWrapper);
 
     const regionElements: Record<string, HTMLElement> = {};
 
@@ -173,7 +227,12 @@ class TerminaiApp {
   }
 
   private setupWindowResize(contentWrapper: HTMLElement): void {
-    const resizeHandler = () => {
+    // Remove old handler if it exists
+    if (this.windowResizeHandler) {
+      window.removeEventListener("resize", this.windowResizeHandler);
+    }
+
+    this.windowResizeHandler = () => {
       const aspectRatio = this.skin.visual.width / this.skin.visual.height;
       const windowWidth = window.innerWidth;
       const windowHeight = window.innerHeight;
@@ -187,22 +246,33 @@ class TerminaiApp {
 
       console.log(`[Resize] Window: ${windowWidth}x${windowHeight}, Scale: ${this.currentScale}, Aspect: skin=${aspectRatio.toFixed(2)}, window=${windowAspect.toFixed(2)}`);
 
-      contentWrapper.style.transform = `scale(${this.currentScale})`;
+      // Use requestAnimationFrame to batch DOM updates and prevent artifacts
+      requestAnimationFrame(() => {
+        contentWrapper.style.transform = `scale(${this.currentScale})`;
 
-      this.skin.regions.forEach((region) => {
-        if (region.type === "terminal") {
-          const container = document.getElementById(`region-${region.id}`) as HTMLElement;
-          if (container) {
-            container.style.left = `${region.rect.x * this.currentScale}px`;
-            container.style.top = `${region.rect.y * this.currentScale}px`;
-            container.style.width = `${region.rect.width * this.currentScale}px`;
-            container.style.height = `${region.rect.height * this.currentScale}px`;
-          }
+        // Resize chrome image (sibling to wrapper)
+        const chromeImg = document.getElementById("chrome-image") as HTMLImageElement;
+        if (chromeImg) {
+          chromeImg.style.width = `${this.skin.visual.width * this.currentScale}px`;
+          chromeImg.style.height = `${this.skin.visual.height * this.currentScale}px`;
         }
+
+        // Update terminal container positions
+        this.skin.regions.forEach((region) => {
+          if (region.type === "terminal") {
+            const container = document.getElementById(`region-${region.id}`) as HTMLElement;
+            if (container) {
+              container.style.left = `${region.rect.x * this.currentScale}px`;
+              container.style.top = `${region.rect.y * this.currentScale}px`;
+              container.style.width = `${region.rect.width * this.currentScale}px`;
+              container.style.height = `${region.rect.height * this.currentScale}px`;
+            }
+          }
+        });
       });
     };
 
-    window.addEventListener("resize", resizeHandler);
+    window.addEventListener("resize", this.windowResizeHandler);
   }
 
   /**
@@ -213,9 +283,7 @@ class TerminaiApp {
     const aspectRatio = this.skin.visual.width / this.skin.visual.height;
     let isResizing = false;
     let startX = 0;
-    let startY = 0;
     let startWidth = 0;
-    let startHeight = 0;
 
     const handleMouseMove = async (e: MouseEvent) => {
       if (!isResizing) {
@@ -282,9 +350,7 @@ class TerminaiApp {
       startResize: (e: MouseEvent) => {
         isResizing = true;
         startX = e.clientX;
-        startY = e.clientY;
         startWidth = window.innerWidth;
-        startHeight = window.innerHeight;
         document.body.style.cursor = 'nwse-resize';
       }
     };
@@ -347,14 +413,6 @@ class TerminaiApp {
     });
   }
 
-  /**
-   * Handle action button clicks
-   */
-  private handleAction(actionId: string): void {
-    console.log(`[Action] ${actionId}`);
-    // TODO: Implement action handlers
-    // For now, just log
-  }
 }
 
 // Initialize the app when DOM is ready
@@ -395,9 +453,15 @@ window.addEventListener("DOMContentLoaded", async () => {
         // Save to localStorage
         SkinBundleLoader.saveToLocalStorage(manifest);
 
-        // Reload the app with the new skin
-        alert(`Skin "${manifest.name}" imported successfully! Reloading...`);
-        window.location.reload();
+        // Reload the app with the new skin WITHOUT page reload
+        // This preserves the terminal session
+        console.log("[Main] Reloading skin without page refresh");
+        await app.reloadSkin(manifest);
+
+        alert(`Skin "${manifest.name}" loaded successfully! Terminal session preserved.`);
+
+        // Reset the file input so the same file can be selected again
+        (e.target as HTMLInputElement).value = "";
       } catch (error) {
         console.error("[Main] Failed to import skin bundle:", error);
         alert(`Failed to import skin: ${error instanceof Error ? error.message : 'Unknown error'}`);

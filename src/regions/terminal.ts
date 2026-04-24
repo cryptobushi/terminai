@@ -49,7 +49,7 @@ $ █`;
 }
 
 export const terminalRenderer: RegionRenderer = {
-  mount(element: HTMLElement, region: Region, dataSource: DataSource, scale: number = 1.0): () => void {
+  mount(element: HTMLElement, _region: Region, _dataSource: DataSource, scale: number = 1.0): () => void {
     if (isTauriEnvironment()) {
       // Real terminal in Tauri
       // DO NOT use cssText as it replaces position/size set by parent
@@ -59,14 +59,31 @@ export const terminalRenderer: RegionRenderer = {
       element.style.overflow = "hidden";
       element.style.boxSizing = "border-box";
 
-      const terminal = new TerminalSession("main", element, scale);
-      globalTerminalSession = terminal; // Store global reference
-      terminal.init();
+      // Reuse existing terminal session if available (for skin changes)
+      if (globalTerminalSession) {
+        console.log("[TerminalRenderer] Reusing existing terminal session");
+        globalTerminalSession.reattachToContainer(element);
 
-      return () => {
-        terminal.close();
-        globalTerminalSession = null;
-      };
+        return () => {
+          // Don't close terminal on cleanup - it may be reused for skin changes
+          // Only detach from container
+          console.log("[TerminalRenderer] Detaching terminal (preserving session)");
+          globalTerminalSession?.detachFromContainer();
+        };
+      } else {
+        // Create new terminal session
+        console.log("[TerminalRenderer] Creating new terminal session");
+        const terminal = new TerminalSession("main", element, scale);
+        globalTerminalSession = terminal; // Store global reference
+        terminal.init();
+
+        return () => {
+          // This cleanup is called when the app is fully destroyed
+          console.log("[TerminalRenderer] Closing terminal session");
+          terminal.close();
+          globalTerminalSession = null;
+        };
+      }
     } else {
       // Simple styled div in browser
       createMockTerminalDisplay(element, scale);
